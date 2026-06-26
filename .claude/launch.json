@@ -1,0 +1,26 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "All (API + Web)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "Web (Next.js)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace=@indexmenow/web"],
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "API (Fastify)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace=@indexmenow/api"],
+      "port": 3001,
+      "autoPort": true
+    }
+  ]
+}

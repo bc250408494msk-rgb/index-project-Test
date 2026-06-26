@@ -1,0 +1,376 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────
+
+enum UserRole {
+  user
+  admin
+  support
+}
+
+enum UrlStatus {
+  queued
+  health_checking
+  health_failed
+  already_indexed
+  signals_firing
+  submitted
+  indexed
+  retry_queued
+  not_indexed
+  refunded
+}
+
+enum UrlSource {
+  dashboard
+  api
+  wordpress
+  bulk_csv
+  sitemap_import
+}
+
+enum SignalType {
+  google_indexing_api
+  gsc_url_inspect
+  sitemap_ping
+  rss_webSub
+  indexnow
+  crawl_trigger
+}
+
+enum SignalStatus {
+  pending
+  success
+  failed
+  skipped
+  error
+}
+
+enum VerificationMethod {
+  google_cse
+  isindexed_api
+  manual
+}
+
+enum CampaignStatus {
+  active
+  paused
+  completed
+}
+
+enum CreditTransactionType {
+  admin_grant
+  admin_deduct
+  charge
+  auto_refund
+  manual_refund
+}
+
+enum NotificationType {
+  indexed
+  health_failed
+  refunded
+  retry_triggered
+  low_credits
+  credits_granted
+  system
+}
+
+// ─── Tables ───────────────────────────────────────────────────
+
+model User {
+  id                    String    @id @default(uuid())
+  username              String    @unique @db.VarChar(100)
+  email                 String    @unique @db.VarChar(255)
+  passwordHash          String    @map("password_hash") @db.VarChar(255)
+  apiKey                String?   @unique @map("api_key") @db.VarChar(64)
+  creditsBalance        Int       @default(0) @map("credits_balance")
+  role                  UserRole  @default(user)
+  emailVerified         Boolean   @default(false) @map("email_verified")
+  emailVerifyToken      String?   @map("email_verify_token") @db.VarChar(255)
+  emailVerifyExpiresAt  DateTime? @map("email_verify_expires_at")
+  passwordResetToken    String?   @map("password_reset_token") @db.VarChar(255)
+  passwordResetExpiresAt DateTime? @map("password_reset_expires_at")
+  lowCreditThreshold    Int       @default(5) @map("low_credit_threshold")
+  notifyOnIndexed       Boolean   @default(true) @map("notify_on_indexed")
+  notifyOnRefund        Boolean   @default(true) @map("notify_on_refund")
+  notifyOnRetry         Boolean   @default(true) @map("notify_on_retry")
+  notifyOnHealthFail    Boolean   @default(true) @map("notify_on_health_fail")
+  notifyOnLowCredits    Boolean   @default(true) @map("notify_on_low_credits")
+  notifyOnCreditsGranted Boolean  @default(true) @map("notify_on_credits_granted")
+  isActive              Boolean   @default(true) @map("is_active")
+  lastLoginAt           DateTime? @map("last_login_at")
+  timezone              String    @default("UTC") @db.VarChar(50)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  projects             Project[]
+  campaigns            Campaign[]
+  urls                 Url[]
+  creditTransactions   CreditTransaction[]
+  grantedCredits       CreditTransaction[] @relation("PerformedBy")
+  sitemapEntries       SitemapEntry[]
+  rssEntries           RssEntry[]
+  notifications        Notification[]
+  apiKeys              ApiKey[]
+
+  @@map("users")
+}
+
+model Project {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  name         String   @db.VarChar(255)
+  description  String?  @db.Text
+  urlCount     Int      @default(0) @map("url_count")
+  indexedCount Int      @default(0) @map("indexed_count")
+  failedCount  Int      @default(0) @map("failed_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaigns Campaign[]
+  urls      Url[]
+
+  @@index([userId])
+  @@map("projects")
+}
+
+model Campaign {
+  id           String         @id @default(uuid())
+  projectId    String         @map("project_id")
+  userId       String         @map("user_id")
+  name         String         @db.VarChar(255)
+  description  String?        @db.Text
+  status       CampaignStatus @default(active)
+  totalUrls    Int            @default(0) @map("total_urls")
+  indexedCount Int            @default(0) @map("indexed_count")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  urls    Url[]
+
+  @@index([projectId])
+  @@index([userId])
+  @@map("campaigns")
+}
+
+model Url {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  projectId        String    @map("project_id")
+  campaignId       String?   @map("campaign_id")
+  url              String    @db.Text
+  urlHash          String    @map("url_hash") @db.VarChar(64)
+  status           UrlStatus @default(queued)
+  httpStatus       Int?      @map("http_status")
+  isIndexable      Boolean?  @map("is_indexable")
+  healthFailReasons String[] @map("health_fail_reasons")
+  signalsFiredAt   DateTime? @map("signals_fired_at")
+  firstCheckAt     DateTime? @map("first_check_at")
+  lastCheckAt      DateTime? @map("last_check_at")
+  checkCount       Int       @default(0) @map("check_count")
+  indexedAt        DateTime? @map("indexed_at")
+  retryCount       Int       @default(0) @map("retry_count")
+  retryFiredAt     DateTime? @map("retry_fired_at")
+  refundedAt       DateTime? @map("refunded_at")
+  creditCharged    Boolean   @default(false) @map("credit_charged")
+  creditRefunded   Boolean   @default(false) @map("credit_refunded")
+  source           UrlSource @default(dashboard)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  campaign     Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  healthChecks UrlHealthCheck[]
+  signals      IndexingSignal[]
+  verifications VerificationCheck[]
+  creditTransactions CreditTransaction[]
+  sitemapEntry SitemapEntry?
+  rssEntry     RssEntry?
+  notifications Notification[]
+
+  @@unique([urlHash, userId])
+  @@index([urlHash, userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([userId])
+  @@map("urls")
+}
+
+model UrlHealthCheck {
+  id               String   @id @default(uuid())
+  urlId            String   @map("url_id")
+  httpStatus       Int?     @map("http_status")
+  responseTimeMs   Int?     @map("response_time_ms")
+  isRedirect       Boolean  @default(false) @map("is_redirect")
+  redirectChain    Json?    @map("redirect_chain")
+  finalUrl         String?  @map("final_url") @db.Text
+  hasNoindex       Boolean  @default(false) @map("has_noindex")
+  noindexSource    String?  @map("noindex_source") @db.VarChar(50)
+  robotsBlocked    Boolean  @default(false) @map("robots_blocked")
+  robotsDirective  String?  @map("robots_directive") @db.Text
+  canonicalUrl     String?  @map("canonical_url") @db.Text
+  canonicalMismatch Boolean @default(false) @map("canonical_mismatch")
+  sslValid         Boolean? @map("ssl_valid")
+  sslExpiryDays    Int?     @map("ssl_expiry_days")
+  pageSizeKb       Int?     @map("page_size_kb")
+  hasContent       Boolean  @default(true) @map("has_content")
+  isIndexable      Boolean  @default(false) @map("is_indexable")
+  failReasons      String[] @map("fail_reasons")
+  warnings         String[]
+  checkedAt        DateTime @default(now()) @map("checked_at")
+
+  url Url @relation(fields: [urlId], references: [id], onDelete: Cascade)
+
+  @@index([urlId])
+  @@map("url_health_checks")
+}
+
+model IndexingSignal {
+  id               String       @id @default(uuid())
+  urlId            String       @map("url_id")
+  signalType       SignalType   @map("signal_type")
+  isRetry          Boolean      @default(false) @map("is_retry")
+  status           SignalStatus @default(pending)
+  httpResponseCode Int?         @map("http_response_code")
+  responseSummary  String?      @map("response_summary") @db.VarChar(500)
+  errorMessage     String?      @map("error_message") @db.Text
+  durationMs       Int?         @map("duration_ms")
+  attemptedAt      DateTime     @default(now()) @map("attempted_at")
+
+  url Url @relation(fields: [urlId], references: [id], onDelete: Cascade)
+
+  @@index([urlId])
+  @@map("indexing_signals")
+}
+
+model VerificationCheck {
+  id          String             @id @default(uuid())
+  urlId       String             @map("url_id")
+  method      VerificationMethod
+  isIndexed   Boolean            @map("is_indexed")
+  rawResponse Json?              @map("raw_response")
+  checkedAt   DateTime           @default(now()) @map("checked_at")
+
+  url Url @relation(fields: [urlId], references: [id], onDelete: Cascade)
+
+  @@index([urlId])
+  @@map("verification_checks")
+}
+
+model CreditTransaction {
+  id            String                @id @default(uuid())
+  userId        String                @map("user_id")
+  type          CreditTransactionType
+  amount        Int
+  balanceBefore Int                   @map("balance_before")
+  balanceAfter  Int                   @map("balance_after")
+  description   String                @db.Text
+  urlId         String?               @map("url_id")
+  performedBy   String?               @map("performed_by")
+  createdAt     DateTime              @default(now()) @map("created_at")
+
+  user      User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url       Url?  @relation(fields: [urlId], references: [id], onDelete: SetNull)
+  performer User? @relation("PerformedBy", fields: [performedBy], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([urlId])
+  @@map("credit_transactions")
+}
+
+model SitemapEntry {
+  id               String    @id @default(uuid())
+  urlId            String    @unique @map("url_id")
+  userId           String    @map("user_id")
+  lastPingedAt     DateTime? @map("last_pinged_at")
+  pingResponseCode Int?      @map("ping_response_code")
+
+  url  Url  @relation(fields: [urlId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sitemap_entries")
+}
+
+model RssEntry {
+  id              String    @id @default(uuid())
+  urlId           String    @unique @map("url_id")
+  userId          String    @map("user_id")
+  pageTitle       String?   @map("page_title") @db.Text
+  pageDescription String?   @map("page_description") @db.Text
+  publishedAt     DateTime  @default(now()) @map("published_at")
+  hubPingResults  Json?     @map("hub_ping_results")
+
+  url  Url  @relation(fields: [urlId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("rss_entries")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String           @db.VarChar(255)
+  message   String           @db.Text
+  urlId     String?          @map("url_id")
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url  Url? @relation(fields: [urlId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model ApiKey {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  keyHash      String    @map("key_hash") @db.VarChar(64)
+  keyPrefix    String    @map("key_prefix") @db.VarChar(8)
+  label        String    @db.VarChar(100)
+  lastUsedAt   DateTime? @map("last_used_at")
+  requestCount Int       @default(0) @map("request_count")
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+model SystemSetting {
+  key         String   @id @db.VarChar(100)
+  value       String   @db.Text
+  description String?  @db.Text
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedBy   String?  @map("updated_by")
+
+  @@map("system_settings")
+}
+
+model BlockedDomain {
+  id        String   @id @default(uuid())
+  domain    String   @unique @db.VarChar(255)
+  reason    String?  @db.Text
+  addedBy   String   @map("added_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("blocked_domains")
+}

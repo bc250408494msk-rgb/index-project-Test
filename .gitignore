@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Secrets / environment (NEVER commit real keys)
+.env
+.env.local
+.env.*.local
+*.pem
+
+
+# Google service account key files
+indexing-*.json
+*-service-account*.json
+
+# Build outputs
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Turborepo / tooling cache
+.turbo/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

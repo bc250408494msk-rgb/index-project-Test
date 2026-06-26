@@ -1,0 +1,21 @@
+{
+  "name": "@indexmenow/database",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "db:generate": "dotenv -e ../../.env -- prisma generate",
+    "db:migrate": "dotenv -e ../../.env -- prisma migrate dev",
+    "db:migrate:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
+    "db:studio": "dotenv -e ../../.env -- prisma studio",
+    "db:seed": "dotenv -e ../../.env -- ts-node prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.15.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.15.0",
+    "typescript": "^5.4.5",
+    "ts-node": "^10.9.2",
+    "dotenv-cli": "^7.4.2"
+  }
+}
