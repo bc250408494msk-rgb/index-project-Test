@@ -27,10 +27,11 @@ async function main() {
   }
 
   // Default admin user
-  const adminEmail = "admin@indexmenow.com";
+  const adminEmail = process.env.ADMIN_EMAIL || "admin@indexmenow.com";
+  const adminPassword = process.env.ADMIN_PASSWORD || "Admin@123!";
   const existing = await prisma.user.findUnique({ where: { email: adminEmail } });
   if (!existing) {
-    const passwordHash = await bcrypt.hash("Admin@123!", 12);
+    const passwordHash = await bcrypt.hash(adminPassword, 12);
     const apiKey = createHash("sha256").update(`admin-api-key-${Date.now()}`).digest("hex");
 
     await prisma.user.create({
@@ -44,7 +45,7 @@ async function main() {
         creditsBalance: 9999,
       },
     });
-    console.log("Created admin user: admin@indexmenow.com / Admin@123!");
+    console.log(`Created admin user: ${adminEmail}`);
   }
 
   console.log("Seed completed.");

@@ -54,7 +54,9 @@ export async function buildApp() {
 
   // ── CORS ─────────────────────────────────────────────────────
   await app.register(fastifyCors, {
-    origin: process.env.APP_URL || "http://localhost:3000",
+    origin: (process.env.ALLOWED_ORIGINS || process.env.APP_URL || "http://localhost:3000")
+      .split(",")
+      .map((o) => o.trim()),
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   });

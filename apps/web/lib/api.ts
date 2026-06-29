@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -25,7 +25,8 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !original._retry) {
       original._retry = true;
       try {
-        const { data } = await axios.post(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true });
+        const refreshBase = process.env.NEXT_PUBLIC_API_URL ?? "";
+        const { data } = await axios.post(`${refreshBase}/api/auth/refresh`, {}, { withCredentials: true });
         if (data.accessToken && typeof window !== "undefined") {
           localStorage.setItem("accessToken", data.accessToken);
           original.headers.Authorization = `Bearer ${data.accessToken}`;
