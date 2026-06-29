@@ -213,7 +213,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     const urlRecord = await prisma.url.findUnique({ where: { id } });
     if (!urlRecord) return reply.status(404).send({ error: "URL not found" });
     const { verifyUrl } = await import("../../modules/verification/index.js");
-    const result = await verifyUrl(id, urlRecord.url);
+    // force=true: admin "Verify now" bypasses the 20h cache and queries Google live.
+    const result = await verifyUrl(id, urlRecord.url, true);
     return reply.send(result);
   });
 

@@ -403,7 +403,9 @@ export default async function urlRoutes(app: FastifyInstance) {
     if (!urlRecord) return reply.status(404).send({ error: "URL not found" });
 
     const { verifyUrl } = await import("../../modules/verification/index.js");
-    const result = await verifyUrl(id, urlRecord.url);
+    // force=true: a manual "Verify now" click bypasses the 20h cache and queries
+    // Google live. Background workers keep using the cache for efficiency.
+    const result = await verifyUrl(id, urlRecord.url, true);
     return reply.send(result);
   });
 

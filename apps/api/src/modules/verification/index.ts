@@ -7,7 +7,7 @@ import { logger } from "../../utils/logger.js";
 const DOUBLE_VERIFY = process.env.DOUBLE_VERIFY_INDEXED !== "false";
 const VERIFICATION_METHOD = process.env.VERIFICATION_METHOD ?? "isindexed";
 
-export async function verifyUrl(urlId: string, url: string): Promise<{ isIndexed: boolean; method: string }> {
+export async function verifyUrl(urlId: string, url: string, force = false): Promise<{ isIndexed: boolean; method: string }> {
   let isIndexed = false;
   let method = VERIFICATION_METHOD;
   let rawResponse: any = {};
@@ -17,17 +17,17 @@ export async function verifyUrl(urlId: string, url: string): Promise<{ isIndexed
       // Google Search Console URL Inspection — authoritative index status.
       // Stored under the "manual" method enum (rawResponse marks via=gsc_inspect)
       // to avoid a DB enum migration.
-      const result = await gscInspectCheck(url);
+      const result = await gscInspectCheck(url, force);
       isIndexed = result.isIndexed;
       rawResponse = result.rawResponse;
       method = "manual";
     } else if (VERIFICATION_METHOD === "google_cse") {
-      const result = await googleCseCheck(url);
+      const result = await googleCseCheck(url, force);
       isIndexed = result.isIndexed;
       rawResponse = result.rawResponse;
       method = "google_cse";
     } else {
-      const result = await isIndexedApiCheck(url);
+      const result = await isIndexedApiCheck(url, force);
       isIndexed = result.isIndexed;
       rawResponse = result.rawResponse;
       method = "isindexed_api";

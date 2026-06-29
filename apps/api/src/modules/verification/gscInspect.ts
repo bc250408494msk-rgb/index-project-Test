@@ -11,10 +11,12 @@ import { logger } from "../../utils/logger.js";
  *   - the URL's domain to be a verified property in Search Console (URL-prefix
  *     or Domain), with the service-account email added as an owner.
  */
-export async function gscInspectCheck(url: string): Promise<{ isIndexed: boolean; rawResponse: any }> {
+export async function gscInspectCheck(url: string, force = false): Promise<{ isIndexed: boolean; rawResponse: any }> {
   const cacheKey = `verify:gsc:${hashUrl(url)}`;
-  const cached = await cacheGet<{ isIndexed: boolean; rawResponse: any }>(cacheKey);
-  if (cached !== null) return cached;
+  if (!force) {
+    const cached = await cacheGet<{ isIndexed: boolean; rawResponse: any }>(cacheKey);
+    if (cached !== null) return cached;
+  }
 
   try {
     const { status, data, siteUrl } = await inspectUrlIndex(url);

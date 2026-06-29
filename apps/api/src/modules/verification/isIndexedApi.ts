@@ -3,10 +3,12 @@ import { cacheGet, cacheSet } from "../../utils/redis.js";
 import { hashUrl } from "../../utils/urlNormalizer.js";
 import { logger } from "../../utils/logger.js";
 
-export async function isIndexedApiCheck(url: string): Promise<{ isIndexed: boolean; rawResponse: any }> {
+export async function isIndexedApiCheck(url: string, force = false): Promise<{ isIndexed: boolean; rawResponse: any }> {
   const cacheKey = `verify:isindexed:${hashUrl(url)}`;
-  const cached = await cacheGet<{ isIndexed: boolean; rawResponse: any }>(cacheKey);
-  if (cached !== null) return cached;
+  if (!force) {
+    const cached = await cacheGet<{ isIndexed: boolean; rawResponse: any }>(cacheKey);
+    if (cached !== null) return cached;
+  }
 
   try {
     const resp = await axios.get("https://api.isindexed.com/v1/check", {
