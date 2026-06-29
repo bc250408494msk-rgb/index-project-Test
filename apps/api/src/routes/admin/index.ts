@@ -1,10 +1,13 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
+import axios from "axios";
 import { prisma } from "../../utils/prisma.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { adminOnly } from "../../middleware/adminOnly.js";
 import { adminGrantCredits } from "../../modules/credits/creditService.js";
 import { getQueues } from "../../queues/index.js";
+import { getGoogleAccessToken } from "../../utils/googleAuth.js";
+import { siteUrlCandidates } from "../../modules/signals/gscInspectApi.js";
 
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook("onRequest", authenticate);
@@ -36,6 +39,67 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
 
     return reply.send({ totalUsers, totalUrls, indexedUrls, refundedUrls, submittedToday, signalSuccessRates, queueStats });
+  });
+
+  // GET /api/admin/diag/google — diagnose the Google service account + GSC ownership
+  // Usage: /api/admin/diag/google?url=https://primewellmedsolutions.com/
+  app.get("/diag/google", async (req, reply) => {
+    const { url } = req.query as { url?: string };
+    const out: any = { checks: {} };
+
+    // 1. Service-account JSON present + parseable?
+    const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    if (!raw) {
+      out.checks.serviceAccountJson = "MISSING — GOOGLE_SERVICE_ACCOUNT_JSON is not set on the API service";
+      return reply.send(out);
+    }
+    try {
+      const creds = JSON.parse(raw);
+      out.serviceAccountEmail = creds.client_email ?? "(no client_email field)";
+      out.projectId = creds.project_id ?? "(no project_id field)";
+      out.checks.serviceAccountJson = "parsed OK";
+    } catch (e: any) {
+      out.checks.serviceAccountJson = "PARSE ERROR — " + e.message;
+      return reply.send(out);
+    }
+
+    // 2. Can we mint an access token with it?
+    let token = "";
+    try {
+      token = await getGoogleAccessToken();
+      out.checks.accessToken = token ? "obtained OK" : "FAILED (empty token)";
+    } catch (e: any) {
+      out.checks.accessToken = "FAILED — " + e.message;
+      return reply.send(out);
+    }
+
+    // 3. For a given URL, try the URL Inspection API against each property format.
+    if (url) {
+      out.inspectionTest = [];
+      for (const siteUrl of siteUrlCandidates(url)) {
+        try {
+          const resp = await axios.post(
+            "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect",
+            { inspectionUrl: url, siteUrl },
+            { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, timeout: 15000, validateStatus: () => true }
+          );
+          out.inspectionTest.push({
+            siteUrl,
+            httpStatus: resp.status,
+            ok: resp.status === 200,
+            verdict: resp.data?.inspectionResult?.indexStatusResult?.verdict,
+            coverageState: resp.data?.inspectionResult?.indexStatusResult?.coverageState,
+            error: resp.data?.error?.message,
+          });
+        } catch (e: any) {
+          out.inspectionTest.push({ siteUrl, error: e.message });
+        }
+      }
+    } else {
+      out.hint = "Append ?url=https://primewellmedsolutions.com/ to test ownership against both property formats.";
+    }
+
+    return reply.send(out);
   });
 
   // GET /api/admin/users
