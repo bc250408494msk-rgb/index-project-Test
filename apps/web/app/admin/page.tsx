@@ -25,7 +25,7 @@ export default function AdminDashboardPage() {
       if (item.status === "success") acc[item.signalType].success = item._count.id;
       if (item.status === "failed") acc[item.signalType].failed = item._count.id;
       return acc;
-    }, {})
+    }, {} as Record<string, { success: number; failed: number }>)
   ).map(([signalType, counts]) => {
     const total = counts.success + counts.failed;
     const rate = total > 0 ? Math.round((counts.success / total) * 100) : 0;
