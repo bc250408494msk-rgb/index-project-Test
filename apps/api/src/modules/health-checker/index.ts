@@ -110,3 +110,27 @@ export async function runHealthCheck(url: string, timeoutMs = 10000): Promise<He
   await cacheSet(cacheKey, result, 3600); // Cache 60 minutes
   return result;
 }
+
+/** Maps a HealthCheckResult into the shape stored in the UrlHealthCheck table. */
+export function healthCheckToRecord(urlId: string, result: HealthCheckResult) {
+  return {
+    urlId,
+    httpStatus: result.checks.httpStatus.value,
+    responseTimeMs: result.responseTimeMs,
+    isRedirect: result.checks.redirect.isRedirect,
+    redirectChain: result.checks.redirect.hops,
+    finalUrl: null,
+    hasNoindex: result.checks.noindex.hasNoindex,
+    noindexSource: result.checks.noindex.source,
+    robotsBlocked: result.checks.robotsTxt.blocked,
+    canonicalUrl: result.checks.canonical.canonicalUrl,
+    canonicalMismatch: result.checks.canonical.mismatch,
+    sslValid: result.checks.ssl.valid,
+    sslExpiryDays: result.checks.ssl.expiryDays,
+    pageSizeKb: result.checks.content.sizeKb,
+    hasContent: result.checks.content.hasHtml,
+    isIndexable: result.isIndexable,
+    failReasons: result.failReasons,
+    warnings: result.warnings,
+  };
+}

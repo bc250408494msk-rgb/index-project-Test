@@ -4,7 +4,7 @@ import { parse as csvParse } from "csv-parse/sync";
 import { XMLParser } from "fast-xml-parser";
 import { prisma } from "../../utils/prisma.js";
 import { authenticate } from "../../middleware/authenticate.js";
-import { runHealthCheck } from "../../modules/health-checker/index.js";
+import { runHealthCheck, healthCheckToRecord } from "../../modules/health-checker/index.js";
 import { malwareCheck } from "../../modules/security/malwareCheck.js";
 import { spamFilter, checkDuplicate } from "../../modules/security/spamFilter.js";
 import { validateUrlFormat, hashUrl, normalizeUrl } from "../../utils/urlNormalizer.js";
@@ -118,6 +118,11 @@ async function processUrls(
           source: source as any,
         },
       });
+
+      // Persist the health check so it shows in the URL detail panel
+      if (item.health) {
+        await prisma.urlHealthCheck.create({ data: healthCheckToRecord(urlRecord.id, item.health) });
+      }
 
       await deductCredit(userId, urlRecord.id, `URL indexing: ${item.url}`);
       creditsUsed++;

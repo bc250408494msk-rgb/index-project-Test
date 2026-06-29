@@ -1,7 +1,7 @@
 import { Worker } from "bullmq";
 import { getRedis } from "../utils/redis.js";
 import { prisma } from "../utils/prisma.js";
-import { runHealthCheck } from "../modules/health-checker/index.js";
+import { runHealthCheck, healthCheckToRecord } from "../modules/health-checker/index.js";
 import { logger } from "../utils/logger.js";
 import type { HealthCheckJob } from "../queues/index.js";
 
@@ -16,28 +16,7 @@ export function createHealthCheckWorker() {
 
       const result = await runHealthCheck(url);
 
-      const healthData = {
-        urlId,
-        httpStatus: result.checks.httpStatus.value,
-        responseTimeMs: result.responseTimeMs,
-        isRedirect: result.checks.redirect.isRedirect,
-        redirectChain: result.checks.redirect.hops,
-        finalUrl: null,
-        hasNoindex: result.checks.noindex.hasNoindex,
-        noindexSource: result.checks.noindex.source,
-        robotsBlocked: result.checks.robotsTxt.blocked,
-        canonicalUrl: result.checks.canonical.canonicalUrl,
-        canonicalMismatch: result.checks.canonical.mismatch,
-        sslValid: result.checks.ssl.valid,
-        sslExpiryDays: result.checks.ssl.expiryDays,
-        pageSizeKb: result.checks.content.sizeKb,
-        hasContent: result.checks.content.hasHtml,
-        isIndexable: result.isIndexable,
-        failReasons: result.failReasons,
-        warnings: result.warnings,
-      };
-
-      await prisma.urlHealthCheck.create({ data: healthData });
+      await prisma.urlHealthCheck.create({ data: healthCheckToRecord(urlId, result) });
 
       if (!result.isIndexable) {
         await prisma.url.update({
