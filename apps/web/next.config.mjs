@@ -9,6 +9,10 @@ const nextConfig = {
       "http://localhost:3001";
     return [
       {
+        source: "/api/health",
+        destination: `${apiDest}/health`,
+      },
+      {
         source: "/api/:path*",
         destination: `${apiDest}/api/:path*`,
       },
