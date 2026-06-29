@@ -22,13 +22,13 @@ export default async function projectRoutes(app: FastifyInstance) {
       }),
       prisma.url.groupBy({
         by: ["projectId"],
-        where: { userId, status: "indexed", projectId: { not: null } },
-        _count: { id: true },
+        where: { userId, status: "indexed" },
+        _count: true,
       }),
     ]);
-    const indexedMap = Object.fromEntries(indexedCounts.map((r) => [r.projectId, r._count.id]));
+    const indexedMap = new Map(indexedCounts.map((r) => [r.projectId, r._count]));
     return reply.send(
-      projects.map((p) => ({ ...p, urlCount: p._count.urls, indexedCount: indexedMap[p.id] ?? 0 }))
+      projects.map((p) => ({ ...p, urlCount: p._count.urls, indexedCount: indexedMap.get(p.id) ?? 0 }))
     );
   });
 
