@@ -1,15 +1,12 @@
 import { FastifyInstance } from "fastify";
-import { createHash } from "crypto";
 import { prisma } from "../../utils/prisma.js";
 import { cacheGet, cacheSet } from "../../utils/redis.js";
 import { generateSitemapXml } from "../../modules/signals/sitemapEngine.js";
 
-async function validateFeedKey(apiKey: string | undefined, userId: string): Promise<boolean> {
-  if (!apiKey) return false;
-  const keyHash = createHash("sha256").update(apiKey).digest("hex");
-  const record = await prisma.apiKey.findFirst({ where: { keyHash, userId, isActive: true } });
-  return !!record;
-}
+// NOTE: Sitemaps, RSS feeds and discovery pages are intentionally PUBLIC.
+// Search-engine crawlers (Googlebot, Bingbot, WebSub hubs) cannot send an
+// API key, so these resources must be readable without auth. They are scoped
+// by an unguessable user UUID in the path.
 
 function escapeXml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -25,8 +22,6 @@ export default async function publicRoutes(app: FastifyInstance) {
   // GET /sitemaps/:userId/sitemap.xml
   app.get("/sitemaps/:userId/sitemap.xml", async (req, reply) => {
     const { userId } = req.params as { userId: string };
-    const { key } = req.query as { key?: string };
-    if (!await validateFeedKey(key, userId)) return reply.status(401).send({ error: "Valid API key required. Add ?key=<your-api-key>" });
 
     const cacheKey = `sitemap:${userId}`;
     let xml = await cacheGet<string>(cacheKey);
@@ -43,8 +38,6 @@ export default async function publicRoutes(app: FastifyInstance) {
   // GET /sitemaps/:userId/sitemap-index.xml
   app.get("/sitemaps/:userId/sitemap-index.xml", async (req, reply) => {
     const { userId } = req.params as { userId: string };
-    const { key } = req.query as { key?: string };
-    if (!await validateFeedKey(key, userId)) return reply.status(401).send({ error: "Valid API key required. Add ?key=<your-api-key>" });
 
     const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
     const count = await prisma.sitemapEntry.count({ where: { userId } });
@@ -54,6 +47,23 @@ export default async function publicRoutes(app: FastifyInstance) {
     ).join("\n");
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${items}\n</sitemapindex>`;
+    reply.header("Content-Type", "application/xml; charset=utf-8");
+    return reply.send(xml);
+  });
+
+  // GET /sitemaps/:userId/sitemap-:page.xml — paginated sitemap (referenced by the index)
+  app.get("/sitemaps/:userId/sitemap-:page.xml", async (req, reply) => {
+    const { userId } = req.params as { userId: string; page: string };
+
+    // Currently all entries fit in a single generated document; serve the same
+    // content so the index never points at a 404.
+    const cacheKey = `sitemap:${userId}`;
+    let xml = await cacheGet<string>(cacheKey);
+    if (!xml) {
+      xml = await generateSitemapXml(userId);
+      await cacheSet(cacheKey, xml, 300);
+    }
+
     reply.header("Content-Type", "application/xml; charset=utf-8");
     return reply.send(xml);
   });
@@ -86,8 +96,6 @@ ${items}
 
   app.get("/feeds/:userId/feed.xml", async (req, reply) => {
     const { userId } = req.params as { userId: string };
-    const { key } = req.query as { key?: string };
-    if (!await validateFeedKey(key, userId)) return reply.status(401).send({ error: "Valid API key required. Add ?key=<your-api-key>" });
 
     const cacheKey = `rss:${userId}`;
     let xml = await cacheGet<string>(cacheKey);
@@ -122,8 +130,6 @@ ${items}
 
   app.get("/feeds/:userId/projects/:projectId/feed.xml", async (req, reply) => {
     const { userId, projectId } = req.params as { userId: string; projectId: string };
-    const { key } = req.query as { key?: string };
-    if (!await validateFeedKey(key, userId)) return reply.status(401).send({ error: "Valid API key required. Add ?key=<your-api-key>" });
 
     const entries = await prisma.rssEntry.findMany({
       where: { userId, url: { projectId } },
@@ -139,8 +145,6 @@ ${items}
 
   app.get("/feeds/:userId/campaigns/:campaignId/feed.xml", async (req, reply) => {
     const { userId, campaignId } = req.params as { userId: string; campaignId: string };
-    const { key } = req.query as { key?: string };
-    if (!await validateFeedKey(key, userId)) return reply.status(401).send({ error: "Valid API key required. Add ?key=<your-api-key>" });
 
     const entries = await prisma.rssEntry.findMany({
       where: { userId, url: { campaignId } },
@@ -192,8 +196,6 @@ ${items}
 
   app.get("/discover/u/:userId", async (req, reply) => {
     const { userId } = req.params as { userId: string };
-    const { key } = req.query as { key?: string };
-    if (!await validateFeedKey(key, userId)) return reply.status(401).send({ error: "Valid API key required. Add ?key=<your-api-key>" });
 
     const urls = await prisma.url.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, take: 50, select: { url: true } });
     const html = await discoverHtml("User Submissions", urls.map((u) => u.url));
