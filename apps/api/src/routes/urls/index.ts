@@ -279,7 +279,7 @@ export default async function urlRoutes(app: FastifyInstance) {
 
   // POST /api/urls/:id/verify
   app.post("/:id/verify", {
-    config: { rateLimit: { max: 5, timeWindow: "1 hour" } },
+    config: { rateLimit: { max: 30, timeWindow: "1 hour" } },
   }, async (req, reply) => {
     const userId = (req as any).user.id;
     const { id } = req.params as { id: string };

@@ -144,7 +144,7 @@ export function UrlDetailDrawer({ urlId, onClose }: Props) {
                           </span>
                         </td>
                         <td className="py-2 text-gray-400">{s.durationMs ? `${s.durationMs}ms` : "—"}</td>
-                        <td className="py-2 text-gray-500 truncate max-w-[150px]">{s.responseSummary ?? "—"}</td>
+                        <td className="py-2 text-gray-500 truncate max-w-[150px]" title={s.responseSummary ?? ""}>{s.responseSummary ?? "—"}</td>
                       </tr>
                     ))}
                   </tbody>
