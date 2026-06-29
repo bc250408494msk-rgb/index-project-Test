@@ -16,7 +16,7 @@ const MAX_BATCH = parseInt(process.env.MAX_URLS_PER_BATCH ?? "500", 10);
 const SIGNALS = ["google_indexing_api", "gsc_url_inspect", "sitemap_ping", "rss_webSub", "indexnow", "crawl_trigger"];
 
 const submitSchema = z.object({
-  urls: z.array(z.string().url()).max(MAX_BATCH),
+  urls: z.array(z.string().min(1)).max(MAX_BATCH),
   projectId: z.string().uuid(),
   campaignId: z.string().uuid().optional(),
   skipHealthCheck: z.boolean().default(false),

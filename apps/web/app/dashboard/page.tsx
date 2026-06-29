@@ -60,7 +60,9 @@ export default function DashboardPage() {
       qc.invalidateQueries({ queryKey: ["balance"] });
     },
     onError: (err: any) => {
-      toast({ title: "Submission failed", description: err?.response?.data?.error ?? "Please try again.", variant: "destructive" });
+      const details = err?.response?.data?.details;
+      const detail = Array.isArray(details) && details.length > 0 ? ` (${details[0].field}: ${details[0].message})` : "";
+      toast({ title: "Submission failed", description: (err?.response?.data?.error ?? "Please try again.") + detail, variant: "destructive" });
     },
   });
 
