@@ -51,8 +51,8 @@ export default function DashboardPage() {
       return urlApi.submit({ urls, projectId: projectId || projects?.[0]?.id });
     },
     onSuccess: (res) => {
-      const { submitted, health_failed, credits_used } = res.data;
-      toast({ title: `${submitted} URL(s) submitted`, description: `${credits_used} credit(s) used. ${health_failed} failed health check.`, variant: "success" });
+      const { submitted, healthFailed, creditsUsed } = res.data;
+      toast({ title: `${submitted} URL(s) submitted`, description: `${creditsUsed} credit(s) used. ${healthFailed} failed health check.`, variant: "success" });
       setUrlInput("");
       setStep("input");
       setHealthResults([]);
@@ -74,8 +74,8 @@ export default function DashboardPage() {
       return urlApi.submitCsv(fd);
     },
     onSuccess: (res) => {
-      const { submitted, health_failed, credits_used } = res.data;
-      toast({ title: `${submitted} URL(s) submitted via CSV`, description: `${credits_used} credit(s) used. ${health_failed} failed health check.`, variant: "success" });
+      const { submitted, healthFailed, creditsUsed } = res.data;
+      toast({ title: `${submitted} URL(s) submitted via CSV`, description: `${creditsUsed} credit(s) used. ${healthFailed} failed health check.`, variant: "success" });
       qc.invalidateQueries({ queryKey: ["urls-recent"] });
       qc.invalidateQueries({ queryKey: ["balance"] });
     },
@@ -87,8 +87,8 @@ export default function DashboardPage() {
   const submitSitemap = useMutation({
     mutationFn: () => urlApi.submitSitemap({ sitemapUrl: sitemapUrl.trim(), projectId: projectId || projects?.[0]?.id }),
     onSuccess: (res) => {
-      const { submitted, health_failed, creditsUsed, total } = res.data;
-      toast({ title: `${submitted} of ${total} URLs submitted from sitemap`, description: `${creditsUsed} credit(s) used. ${health_failed} failed health check.`, variant: "success" });
+      const { submitted, healthFailed, creditsUsed, total } = res.data;
+      toast({ title: `${submitted} of ${total} URLs submitted from sitemap`, description: `${creditsUsed} credit(s) used. ${healthFailed} failed health check.`, variant: "success" });
       setSitemapUrl("");
       setShowSitemap(false);
       qc.invalidateQueries({ queryKey: ["urls-recent"] });

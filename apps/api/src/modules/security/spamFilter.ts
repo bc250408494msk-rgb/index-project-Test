@@ -33,9 +33,9 @@ export async function spamFilter(url: string, userId: string): Promise<SpamFilte
     return { allowed: false, reason: "Same URL submitted more than 3 times in 24 hours" };
   }
 
-  // Soft block: same domain > 50 times in 1 hour
+  // Soft block: same domain > 50 times in 1 hour (protocol-agnostic match)
   const domainHourCount = await prisma.url.count({
-    where: { userId, url: { startsWith: `https://${domain}` }, createdAt: { gte: since1h } },
+    where: { userId, url: { contains: `//${domain}` }, createdAt: { gte: since1h } },
   });
   if (domainHourCount > 50) {
     return { allowed: true, softBlock: true, reason: `High volume from domain ${domain} — flagged for review` };

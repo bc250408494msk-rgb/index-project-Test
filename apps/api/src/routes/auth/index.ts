@@ -102,7 +102,12 @@ export default async function authRoutes(app: FastifyInstance) {
 
     if (!user.isActive) return reply.status(403).send({ error: "Account is disabled" });
 
-    if (!user.emailVerified) return reply.status(403).send({ error: "Please verify your email before signing in. Check your inbox or resend the verification email." });
+    // Email verification gate — set REQUIRE_EMAIL_VERIFICATION=false to allow login
+    // before email delivery (Resend verified domain) is configured.
+    const requireEmailVerification = process.env.REQUIRE_EMAIL_VERIFICATION !== "false";
+    if (requireEmailVerification && !user.emailVerified) {
+      return reply.status(403).send({ error: "Please verify your email before signing in. Check your inbox or resend the verification email." });
+    }
 
     const { accessToken, refreshToken } = signTokens(app, user.id, user.role);
 
