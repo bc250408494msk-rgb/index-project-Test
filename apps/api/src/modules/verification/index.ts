@@ -1,6 +1,7 @@
 import { prisma } from "../../utils/prisma.js";
 import { googleCseCheck } from "./googleCse.js";
 import { isIndexedApiCheck } from "./isIndexedApi.js";
+import { gscInspectCheck } from "./gscInspect.js";
 import { logger } from "../../utils/logger.js";
 
 const DOUBLE_VERIFY = process.env.DOUBLE_VERIFY_INDEXED !== "false";
@@ -12,7 +13,15 @@ export async function verifyUrl(urlId: string, url: string): Promise<{ isIndexed
   let rawResponse: any = {};
 
   try {
-    if (VERIFICATION_METHOD === "google_cse") {
+    if (VERIFICATION_METHOD === "gsc") {
+      // Google Search Console URL Inspection — authoritative index status.
+      // Stored under the "manual" method enum (rawResponse marks via=gsc_inspect)
+      // to avoid a DB enum migration.
+      const result = await gscInspectCheck(url);
+      isIndexed = result.isIndexed;
+      rawResponse = result.rawResponse;
+      method = "manual";
+    } else if (VERIFICATION_METHOD === "google_cse") {
       const result = await googleCseCheck(url);
       isIndexed = result.isIndexed;
       rawResponse = result.rawResponse;
