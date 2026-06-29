@@ -168,10 +168,14 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // GET /api/admin/urls
   app.get("/urls", async (req, reply) => {
-    const { status, userId } = req.query as any;
+    const { status, userId, search } = req.query as any;
     const limit = Math.min(parseInt((req.query as any).limit ?? "50", 10), 200);
     const offset = Math.max(parseInt((req.query as any).offset ?? "0", 10), 0);
-    const where = { ...(status ? { status } : {}), ...(userId ? { userId } : {}) };
+    const where = {
+      ...(status ? { status } : {}),
+      ...(userId ? { userId } : {}),
+      ...(search ? { url: { contains: search } } : {}),
+    };
     const [urls, total] = await Promise.all([
       prisma.url.findMany({
         where,

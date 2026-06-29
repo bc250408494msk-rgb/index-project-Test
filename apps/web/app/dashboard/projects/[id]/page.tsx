@@ -90,7 +90,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
                   </a>
                 </td>
                 <td className="px-4 py-3">
-                  <HealthBadge status={url.isIndexable === true ? "pass" : url.isIndexable === false ? "fail" : null} />
+                  <HealthBadge status={url.healthChecks?.[0]?.isIndexable === true ? "pass" : url.healthChecks?.[0]?.isIndexable === false ? "fail" : null} />
                 </td>
                 <td className="px-4 py-3">
                   <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[url.status] ?? "bg-gray-100 text-gray-600"}`}>

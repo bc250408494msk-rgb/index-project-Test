@@ -61,7 +61,7 @@ export default function AdminUrlsPage() {
       <div className="bg-white rounded-xl border overflow-hidden">
         {isLoading ? (
           <div className="text-center py-16 text-gray-400">Loading URLs...</div>
-        ) : !data?.length ? (
+        ) : !data?.urls?.length ? (
           <div className="text-center py-16 text-gray-400">No URLs found</div>
         ) : (
           <Table>
@@ -76,7 +76,7 @@ export default function AdminUrlsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map((url: any) => (
+              {data.urls.map((url: any) => (
                 <TableRow key={url.id}>
                   <TableCell className="max-w-xs">
                     <a href={url.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm" title={url.url}>

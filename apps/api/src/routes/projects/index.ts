@@ -14,11 +14,22 @@ export default async function projectRoutes(app: FastifyInstance) {
   // GET /api/projects
   app.get("/", async (req, reply) => {
     const userId = (req as any).user.id;
-    const projects = await prisma.project.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-    });
-    return reply.send(projects);
+    const [projects, indexedCounts] = await Promise.all([
+      prisma.project.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        include: { _count: { select: { urls: true } } },
+      }),
+      prisma.url.groupBy({
+        by: ["projectId"],
+        where: { userId, status: "indexed", projectId: { not: null } },
+        _count: { id: true },
+      }),
+    ]);
+    const indexedMap = Object.fromEntries(indexedCounts.map((r) => [r.projectId, r._count.id]));
+    return reply.send(
+      projects.map((p) => ({ ...p, urlCount: p._count.urls, indexedCount: indexedMap[p.id] ?? 0 }))
+    );
   });
 
   // POST /api/projects
