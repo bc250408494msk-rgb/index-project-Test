@@ -29,6 +29,7 @@ export default function DashboardPage() {
   const { data: user } = useQuery({ queryKey: ["me"], queryFn: () => userApi.me().then((r) => r.data) });
   const { data: balance } = useQuery({ queryKey: ["balance"], queryFn: () => creditApi.balance().then((r) => r.data) });
   const { data: urlsData } = useQuery({ queryKey: ["urls-recent"], queryFn: () => urlApi.list({ limit: 10 }).then((r) => r.data) });
+  const { data: urlStats } = useQuery({ queryKey: ["url-stats"], queryFn: () => userApi.stats().then((r) => r.data) });
   const { data: projects } = useQuery({ queryKey: ["projects"], queryFn: () => projectApi.list().then((r) => r.data) });
 
   const check = useMutation({
@@ -57,6 +58,7 @@ export default function DashboardPage() {
       setStep("input");
       setHealthResults([]);
       qc.invalidateQueries({ queryKey: ["urls-recent"] });
+      qc.invalidateQueries({ queryKey: ["url-stats"] });
       qc.invalidateQueries({ queryKey: ["balance"] });
     },
     onError: (err: any) => {
@@ -77,6 +79,7 @@ export default function DashboardPage() {
       const { submitted, healthFailed, creditsUsed } = res.data;
       toast({ title: `${submitted} URL(s) submitted via CSV`, description: `${creditsUsed} credit(s) used. ${healthFailed} failed health check.`, variant: "success" });
       qc.invalidateQueries({ queryKey: ["urls-recent"] });
+      qc.invalidateQueries({ queryKey: ["url-stats"] });
       qc.invalidateQueries({ queryKey: ["balance"] });
     },
     onError: (err: any) => {
@@ -92,6 +95,7 @@ export default function DashboardPage() {
       setSitemapUrl("");
       setShowSitemap(false);
       qc.invalidateQueries({ queryKey: ["urls-recent"] });
+      qc.invalidateQueries({ queryKey: ["url-stats"] });
       qc.invalidateQueries({ queryKey: ["balance"] });
     },
     onError: (err: any) => {
@@ -104,6 +108,7 @@ export default function DashboardPage() {
     onSuccess: () => {
       toast({ title: "URL deleted", variant: "success" });
       qc.invalidateQueries({ queryKey: ["urls-recent"] });
+      qc.invalidateQueries({ queryKey: ["url-stats"] });
       qc.invalidateQueries({ queryKey: ["balance"] });
     },
     onError: (err: any) => {
@@ -116,10 +121,10 @@ export default function DashboardPage() {
 
   const stats = [
     { label: "Credits", value: balance?.credits ?? user?.creditsBalance ?? 0, icon: "💳", color: "text-blue-600" },
-    { label: "Submitted", value: totalSubmitted, icon: "🔗", color: "text-gray-700" },
-    { label: "Indexed", value: recentUrls.filter((u: any) => u.status === "indexed").length, icon: "✅", color: "text-green-600" },
-    { label: "Pending", value: recentUrls.filter((u: any) => ["submitted", "signals_firing"].includes(u.status)).length, icon: "⏳", color: "text-yellow-600" },
-    { label: "Refunded", value: recentUrls.filter((u: any) => u.status === "refunded").length, icon: "🔄", color: "text-orange-600" },
+    { label: "Submitted", value: urlStats?.total ?? totalSubmitted, icon: "🔗", color: "text-gray-700" },
+    { label: "Indexed", value: urlStats?.indexed ?? 0, icon: "✅", color: "text-green-600" },
+    { label: "Pending", value: urlStats?.pending ?? 0, icon: "⏳", color: "text-yellow-600" },
+    { label: "Refunded", value: urlStats?.refunded ?? 0, icon: "🔄", color: "text-orange-600" },
   ];
 
   return (
@@ -242,9 +247,9 @@ export default function DashboardPage() {
           ) : (
             <div className="grid grid-cols-3 gap-4 mt-2">
               {[
-                { label: "Success rate", value: recentUrls.length ? `${Math.round((recentUrls.filter((u: any) => u.status === "indexed").length / recentUrls.length) * 100)}%` : "—", color: "text-green-600" },
-                { label: "Health failed", value: recentUrls.filter((u: any) => u.status === "health_failed").length, color: "text-red-500" },
-                { label: "Auto-refunded", value: recentUrls.filter((u: any) => u.status === "refunded").length, color: "text-orange-500" },
+                { label: "Success rate", value: urlStats?.total ? `${Math.round(((urlStats.indexed ?? 0) / urlStats.total) * 100)}%` : "—", color: "text-green-600" },
+                { label: "Health failed", value: urlStats?.healthFailed ?? 0, color: "text-red-500" },
+                { label: "Auto-refunded", value: urlStats?.refunded ?? 0, color: "text-orange-500" },
               ].map(({ label, value, color }) => (
                 <div key={label} className="bg-gray-50 rounded-lg p-4 text-center">
                   <div className={`text-2xl font-bold ${color}`}>{value}</div>

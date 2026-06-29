@@ -132,6 +132,7 @@ async function processUrls(
           urlHash: hashUrl(item.url),
           status: "signals_firing",
           source: source as any,
+          isIndexable: item.health?.isIndexable ?? null,
         },
       });
 

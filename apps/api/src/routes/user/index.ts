@@ -149,6 +149,19 @@ export default async function userRoutes(app: FastifyInstance) {
     return reply.send({ message: "Preferences updated" });
   });
 
+  // GET /api/user/stats
+  app.get("/stats", async (req, reply) => {
+    const userId = (req as any).user.id;
+    const [total, indexed, pending, healthFailed, refunded] = await Promise.all([
+      prisma.url.count({ where: { userId } }),
+      prisma.url.count({ where: { userId, status: "indexed" } }),
+      prisma.url.count({ where: { userId, status: { in: ["submitted", "signals_firing"] } } }),
+      prisma.url.count({ where: { userId, status: "health_failed" } }),
+      prisma.url.count({ where: { userId, status: "refunded" } }),
+    ]);
+    return reply.send({ total, indexed, pending, healthFailed, refunded });
+  });
+
   // GET /api/user/api-keys
   app.get("/api-keys", async (req, reply) => {
     const userId = (req as any).user.id;

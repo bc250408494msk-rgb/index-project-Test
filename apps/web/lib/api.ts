@@ -54,6 +54,7 @@ export const userApi = {
   markRead: (id: string) => api.put(`/api/user/notifications/${id}/read`),
   getPreferences: () => api.get("/api/user/preferences"),
   updatePreferences: (data: any) => api.put("/api/user/preferences", data),
+  stats: () => api.get("/api/user/stats"),
   getApiKeys: () => api.get("/api/user/api-keys"),
   createApiKey: (label: string) => api.post("/api/user/api-keys", { label }),
   revokeApiKey: (id: string) => api.delete(`/api/user/api-keys/${id}`),
