@@ -99,6 +99,18 @@ export default function DashboardPage() {
     },
   });
 
+  const deleteUrl = useMutation({
+    mutationFn: (id: string) => urlApi.delete(id),
+    onSuccess: () => {
+      toast({ title: "URL deleted", variant: "success" });
+      qc.invalidateQueries({ queryKey: ["urls-recent"] });
+      qc.invalidateQueries({ queryKey: ["balance"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Delete failed", description: err?.response?.data?.error ?? "Please try again.", variant: "destructive" });
+    },
+  });
+
   const stats = [
     { label: "Credits", value: balance?.credits ?? user?.creditsBalance ?? 0, icon: "💳", color: "text-blue-600" },
     { label: "Submitted", value: urlsData?.total ?? urlsData?.length ?? 0, icon: "🔗", color: "text-gray-700" },
@@ -268,9 +280,18 @@ export default function DashboardPage() {
                 <p className="text-sm text-gray-900 truncate">{url.url}</p>
                 <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(url.createdAt)}</p>
               </div>
-              <span className={`ml-4 text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[url.status] ?? "bg-gray-100 text-gray-600"}`}>
-                {url.status.replace(/_/g, " ")}
-              </span>
+              <div className="ml-4 flex items-center gap-3">
+                <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[url.status] ?? "bg-gray-100 text-gray-600"}`}>
+                  {url.status.replace(/_/g, " ")}
+                </span>
+                <button
+                  onClick={() => { if (window.confirm("Delete this URL permanently? This cannot be undone.")) deleteUrl.mutate(url.id); }}
+                  disabled={deleteUrl.isPending}
+                  className="text-xs text-red-400 hover:text-red-600 disabled:opacity-50"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           ))}
         </div>

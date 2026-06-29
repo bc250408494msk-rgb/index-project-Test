@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { urlApi, projectApi } from "@/lib/api";
 import { formatDate, truncateUrl } from "@/lib/utils";
 import { SignalStatusIcons } from "@/components/signals/SignalStatusIcons";
 import { HealthBadge } from "@/components/health/HealthBadge";
 import { UrlDetailDrawer } from "@/components/urls/UrlDetailDrawer";
+import { toast } from "@/hooks/use-toast";
 
 const STATUS_COLORS: Record<string, string> = {
   indexed: "bg-green-100 text-green-700",
@@ -24,10 +25,22 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
   const [filter, setFilter] = useState("all");
   const [selectedUrlId, setSelectedUrlId] = useState<string | null>(null);
 
+  const qc = useQueryClient();
   const { data: project } = useQuery({ queryKey: ["project", params.id], queryFn: () => projectApi.get(params.id).then((r) => r.data) });
   const { data: urls, isLoading } = useQuery({
     queryKey: ["urls", params.id, filter],
     queryFn: () => urlApi.list({ projectId: params.id, status: filter === "all" ? undefined : filter, limit: 100 }).then((r) => r.data),
+  });
+
+  const deleteUrl = useMutation({
+    mutationFn: (id: string) => urlApi.delete(id),
+    onSuccess: () => {
+      toast({ title: "URL deleted", variant: "success" });
+      qc.invalidateQueries({ queryKey: ["urls"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Delete failed", description: err?.response?.data?.error ?? "Please try again.", variant: "destructive" });
+    },
   });
 
   return (
@@ -90,7 +103,16 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
                 <td className="px-4 py-3 text-gray-400 text-xs">{url.indexedAt ? formatDate(url.indexedAt) : "—"}</td>
                 <td className="px-4 py-3 text-gray-400 text-xs text-center">{url.retryCount}</td>
                 <td className="px-4 py-3">
-                  <button onClick={() => setSelectedUrlId(url.id)} className="text-xs text-blue-600 hover:underline">Details</button>
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setSelectedUrlId(url.id)} className="text-xs text-blue-600 hover:underline">Details</button>
+                    <button
+                      onClick={() => { if (window.confirm("Delete this URL permanently? This cannot be undone.")) deleteUrl.mutate(url.id); }}
+                      disabled={deleteUrl.isPending}
+                      className="text-xs text-red-400 hover:text-red-600 disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

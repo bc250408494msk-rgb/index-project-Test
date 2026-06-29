@@ -58,9 +58,27 @@ export function UrlDetailDrawer({ urlId, onClose }: Props) {
       });
     },
     onError: (err: any) => {
-      toast({ title: "Verification failed", description: err?.response?.data?.error ?? "Try again shortly (max 5 checks/hour).", variant: "destructive" });
+      toast({ title: "Verification failed", description: err?.response?.data?.error ?? "Try again shortly (max 30 checks/hour).", variant: "destructive" });
     },
   });
+
+  const del = useMutation({
+    mutationFn: () => urlApi.delete(urlId!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["urls-recent"] });
+      qc.invalidateQueries({ queryKey: ["urls"] });
+      qc.invalidateQueries({ queryKey: ["balance"] });
+      toast({ title: "URL deleted", variant: "success" });
+      onClose();
+    },
+    onError: (err: any) => {
+      toast({ title: "Delete failed", description: err?.response?.data?.error ?? "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const handleDelete = () => {
+    if (window.confirm("Delete this URL permanently? This cannot be undone.")) del.mutate();
+  };
 
   if (!urlId) return null;
 
@@ -85,15 +103,24 @@ export function UrlDetailDrawer({ urlId, onClose }: Props) {
                   {url.status.replace(/_/g, " ")}
                 </span>
                 <span className="text-xs text-gray-400">Submitted {formatDateTime(url.createdAt)}</span>
-                {url.status !== "indexed" && url.status !== "health_failed" && (
+                <div className="ml-auto flex items-center gap-2">
+                  {url.status !== "indexed" && url.status !== "health_failed" && (
+                    <button
+                      onClick={() => resubmit.mutate()}
+                      disabled={resubmit.isPending || resubmitDone}
+                      className="text-xs px-3 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 font-medium"
+                    >
+                      {resubmit.isPending ? "Resubmitting…" : resubmitDone ? "Resubmitted ✓" : "Resubmit"}
+                    </button>
+                  )}
                   <button
-                    onClick={() => resubmit.mutate()}
-                    disabled={resubmit.isPending || resubmitDone}
-                    className="ml-auto text-xs px-3 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 font-medium"
+                    onClick={handleDelete}
+                    disabled={del.isPending}
+                    className="text-xs px-3 py-1 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50 font-medium"
                   >
-                    {resubmit.isPending ? "Resubmitting…" : resubmitDone ? "Resubmitted ✓" : "Resubmit"}
+                    {del.isPending ? "Deleting…" : "Delete"}
                   </button>
-                )}
+                </div>
               </div>
             </div>
 
