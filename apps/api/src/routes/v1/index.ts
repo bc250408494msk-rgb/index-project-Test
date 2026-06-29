@@ -57,8 +57,10 @@ export default async function v1Routes(app: FastifyInstance) {
       const malware = await malwareCheck(url);
       if (!malware.safe) { results.push({ url, status: "rejected", reason: "URL flagged as potentially harmful" }); continue; }
 
+      let isIndexable: boolean | null = null;
       if (!body.skip_health_check) {
         const health = await runHealthCheck(url);
+        isIndexable = health.isIndexable;
         if (!health.isIndexable) { healthFailed++; results.push({ url, status: "health_failed", health: { is_indexable: false } }); continue; }
       }
 
@@ -68,7 +70,7 @@ export default async function v1Routes(app: FastifyInstance) {
       }
 
       const urlRecord = await prisma.url.create({
-        data: { userId, projectId, campaignId: body.campaign_id, url, urlHash: hashUrl(url), status: "signals_firing", source: "api" },
+        data: { userId, projectId, campaignId: body.campaign_id, url, urlHash: hashUrl(url), status: "signals_firing", source: "api", isIndexable },
       });
 
       await deductCredit(userId, urlRecord.id, `API submission: ${url}`);
