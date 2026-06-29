@@ -19,14 +19,14 @@ export default function AdminDashboardPage() {
 
   const queueEntries = Object.entries(stats?.queueStats ?? {});
 
-  const signalRates = Object.entries(
+  const signalRates = (Object.entries(
     (stats?.signalSuccessRates ?? []).reduce((acc: Record<string, { success: number; failed: number }>, item: any) => {
       if (!acc[item.signalType]) acc[item.signalType] = { success: 0, failed: 0 };
       if (item.status === "success") acc[item.signalType].success = item._count.id;
       if (item.status === "failed") acc[item.signalType].failed = item._count.id;
       return acc;
     }, {} as Record<string, { success: number; failed: number }>)
-  ).map(([signalType, counts]) => {
+  ) as Array<[string, { success: number; failed: number }]>).map(([signalType, counts]) => {
     const total = counts.success + counts.failed;
     const rate = total > 0 ? Math.round((counts.success / total) * 100) : 0;
     return { signalType, rate, total };
