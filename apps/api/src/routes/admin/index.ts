@@ -104,15 +104,20 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // GET /api/admin/users
   app.get("/users", async (req, reply) => {
-    const { search, limit = "50", offset = "0" } = req.query as any;
-    const users = await prisma.user.findMany({
-      where: search ? { OR: [{ email: { contains: search } }, { username: { contains: search } }] } : {},
-      orderBy: { createdAt: "desc" },
-      take: parseInt(limit),
-      skip: parseInt(offset),
-      select: { id: true, username: true, email: true, role: true, creditsBalance: true, isActive: true, emailVerified: true, lastLoginAt: true, createdAt: true },
-    });
-    const total = await prisma.user.count();
+    const { search } = req.query as any;
+    const limit = Math.min(parseInt((req.query as any).limit ?? "50", 10), 200);
+    const offset = Math.max(parseInt((req.query as any).offset ?? "0", 10), 0);
+    const where = search ? { OR: [{ email: { contains: search } }, { username: { contains: search } }] } : {};
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+        select: { id: true, username: true, email: true, role: true, creditsBalance: true, isActive: true, emailVerified: true, lastLoginAt: true, createdAt: true },
+      }),
+      prisma.user.count({ where }),
+    ]);
     return reply.send({ users, total });
   });
 
@@ -135,6 +140,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.post("/users/:id/credits", async (req, reply) => {
     const adminId = (req as any).user.id;
     const { id } = req.params as { id: string };
+    if (id === adminId) return reply.status(400).send({ error: "Admins cannot grant credits to their own account" });
     const { amount, reason } = z.object({ amount: z.number().int().min(-9999).max(9999), reason: z.string().min(1).max(500) }).parse(req.body);
     await adminGrantCredits(adminId, id, amount, reason);
     return reply.send({ message: `${Math.abs(amount)} credit(s) ${amount > 0 ? "granted" : "deducted"}` });
@@ -162,15 +168,24 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // GET /api/admin/urls
   app.get("/urls", async (req, reply) => {
-    const { status, userId, limit = "50", offset = "0" } = req.query as any;
-    const urls = await prisma.url.findMany({
-      where: { ...(status ? { status } : {}), ...(userId ? { userId } : {}) },
-      orderBy: { createdAt: "desc" },
-      take: parseInt(limit),
-      skip: parseInt(offset),
-      include: { user: { select: { username: true, email: true } } },
-    });
-    const total = await prisma.url.count({ where: { ...(status ? { status } : {}), ...(userId ? { userId } : {}) } });
+    const { status, userId } = req.query as any;
+    const limit = Math.min(parseInt((req.query as any).limit ?? "50", 10), 200);
+    const offset = Math.max(parseInt((req.query as any).offset ?? "0", 10), 0);
+    const where = { ...(status ? { status } : {}), ...(userId ? { userId } : {}) };
+    const [urls, total] = await Promise.all([
+      prisma.url.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+        include: {
+          user: { select: { username: true, email: true } },
+          healthChecks: { take: 1, orderBy: { checkedAt: "desc" } },
+          signals: { orderBy: { attemptedAt: "desc" } },
+        },
+      }),
+      prisma.url.count({ where }),
+    ]);
     return reply.send({ urls, total });
   });
 

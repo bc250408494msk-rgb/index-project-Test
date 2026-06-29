@@ -52,8 +52,14 @@ export function createIndexingSignalWorker() {
           },
         });
 
-        // Check if ALL 6 signals for this URL are done
-        const allSignals = await prisma.indexingSignal.findMany({ where: { urlId, isRetry } });
+        // Check if ALL 6 signals for this URL batch are done.
+        // We query the most recent 6 signals with the same isRetry flag to avoid
+        // counting signals from previous retry batches (which would exceed 6).
+        const allSignals = await prisma.indexingSignal.findMany({
+          where: { urlId, isRetry },
+          orderBy: { attemptedAt: "desc" },
+          take: 6,
+        });
         const allDone = allSignals.length === 6 && allSignals.every((s) => s.status !== "pending");
 
         if (allDone) {
@@ -65,7 +71,7 @@ export function createIndexingSignalWorker() {
           // Schedule first verification check in 24h
           await verificationQueue.add(
             "verify",
-            { urlId, url, checkCount: 1, submittedAt: new Date().toISOString() },
+            { urlId, url, submittedAt: new Date().toISOString() },
             { delay: 24 * 60 * 60 * 1000 }
           );
 

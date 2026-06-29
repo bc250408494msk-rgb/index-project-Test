@@ -1,4 +1,5 @@
 import { Worker } from "bullmq";
+import * as Sentry from "@sentry/node";
 import { getRedis } from "../utils/redis.js";
 import { prisma } from "../utils/prisma.js";
 import { runHealthCheck } from "../modules/health-checker/index.js";
@@ -9,6 +10,8 @@ import { logger } from "../utils/logger.js";
 const RETRY_WINDOW = parseInt(process.env.RETRY_WINDOW_DAYS ?? "7", 10);
 const SIGNALS = ["google_indexing_api", "gsc_url_inspect", "sitemap_ping", "rss_webSub", "indexnow", "crawl_trigger"];
 
+const BATCH_SIZE = 500;
+
 export function createRetryWorker() {
   // This worker runs on a repeatable schedule — finds day-7 URLs and processes them
   return new Worker(
@@ -17,17 +20,24 @@ export function createRetryWorker() {
       logger.info("Retry worker: scanning for day-7 unindexed URLs");
 
       const cutoff = new Date(Date.now() - RETRY_WINDOW * 24 * 60 * 60 * 1000);
-      const urls = await prisma.url.findMany({
-        where: {
-          status: "submitted",
-          signalsFiredAt: { lte: cutoff },
-          retryCount: 0,
-        },
-        include: { user: { select: { id: true, email: true, notifyOnRetry: true, notifyOnHealthFail: true } } },
-        take: 100,
-      });
+      let processed = 0;
+      let cursor: string | undefined;
 
-      logger.info({ count: urls.length }, "Retry worker: found URLs to retry");
+      while (true) {
+        const urls = await prisma.url.findMany({
+          where: {
+            status: "submitted",
+            signalsFiredAt: { lte: cutoff },
+            retryCount: 0,
+          },
+          include: { user: { select: { id: true, email: true, notifyOnRetry: true, notifyOnHealthFail: true } } },
+          orderBy: { id: "asc" },
+          take: BATCH_SIZE,
+          ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+        });
+
+        if (!urls.length) break;
+        logger.info({ count: urls.length }, "Retry worker: processing batch");
 
       for (const urlRecord of urls) {
         try {
@@ -85,11 +95,19 @@ export function createRetryWorker() {
             });
           }
 
+          processed++;
           logger.info({ urlId: urlRecord.id }, "7-day retry fired");
         } catch (err) {
           logger.error({ err, urlId: urlRecord.id }, "Retry worker error for URL");
+          if (process.env.SENTRY_DSN) Sentry.captureException(err, { extra: { urlId: urlRecord.id } });
         }
       }
+
+        if (urls.length < BATCH_SIZE) break;
+        cursor = urls[urls.length - 1].id;
+      }
+
+      logger.info({ processed }, "Retry worker: run complete");
     },
     {
       connection: getRedis() as any,

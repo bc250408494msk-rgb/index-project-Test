@@ -1,20 +1,16 @@
 import axios from "axios";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
-
+// Use a relative base URL so all requests go through Next.js rewrites
+// (next.config.mjs proxies /api/* → the Fastify backend).
+// This ensures the Set-Cookie response header arrives on the same origin
+// as the Next.js app, making the httpOnly cookie visible to Edge middleware.
+// NEXT_PUBLIC_API_URL is only needed for direct server-to-server calls.
 export const api = axios.create({
-  baseURL: API_URL,
+  baseURL: "",
+  // withCredentials sends the httpOnly cookie on every request — this is the
+  // sole auth mechanism. Do NOT store tokens in localStorage (XSS risk).
   withCredentials: true,
   headers: { "Content-Type": "application/json" },
-});
-
-// Attach access token from localStorage (for SSR-agnostic auth)
-api.interceptors.request.use((config) => {
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("accessToken");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
 });
 
 // Auto-refresh on 401
@@ -25,16 +21,11 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !original._retry) {
       original._retry = true;
       try {
-        const refreshBase = process.env.NEXT_PUBLIC_API_URL ?? "";
-        const { data } = await axios.post(`${refreshBase}/api/auth/refresh`, {}, { withCredentials: true });
-        if (data.accessToken && typeof window !== "undefined") {
-          localStorage.setItem("accessToken", data.accessToken);
-          original.headers.Authorization = `Bearer ${data.accessToken}`;
-        }
+        await axios.post("/api/auth/refresh", {}, { withCredentials: true });
+        // New accessToken cookie is set by the server; just retry the original request
         return api(original);
       } catch {
         if (typeof window !== "undefined") {
-          localStorage.removeItem("accessToken");
           window.location.href = "/login";
         }
       }

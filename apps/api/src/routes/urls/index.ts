@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { parse as csvParse } from "csv-parse/sync";
 import { XMLParser } from "fast-xml-parser";
+import pLimit from "p-limit";
 import { prisma } from "../../utils/prisma.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { runHealthCheck, healthCheckToRecord } from "../../modules/health-checker/index.js";
@@ -22,6 +23,17 @@ const submitSchema = z.object({
   skipHealthCheck: z.boolean().default(false),
 });
 
+const sitemapSubmitSchema = z.object({
+  sitemapUrl: z.string().url(),
+  projectId: z.string().uuid().optional(),
+  campaignId: z.string().uuid().optional(),
+});
+
+const paginationSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 async function processUrls(
   rawUrls: string[],
   userId: string,
@@ -37,11 +49,13 @@ async function processUrls(
   let duplicates = 0;
 
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { creditsBalance: true } });
-  const validUrlsForCharge: string[] = [];
 
-  // Step 1: Validate and pre-process all URLs
-  const processed = await Promise.all(
-    rawUrls.map(async (rawUrl) => {
+  // Step 1: Validate and pre-process all URLs.
+  // p-limit caps outbound HTTP concurrency so a 500-URL batch doesn't fire
+  // 500 simultaneous external requests (health check + malware check per URL).
+  const limit = pLimit(15);
+  const settled = await Promise.allSettled(
+    rawUrls.map((rawUrl) => limit(async () => {
       const formatCheck = validateUrlFormat(rawUrl);
       if (!formatCheck.valid) {
         return { url: rawUrl, status: "rejected", reason: formatCheck.reason };
@@ -49,25 +63,21 @@ async function processUrls(
 
       const url = normalizeUrl(rawUrl);
 
-      // Spam filter
       const spam = await spamFilter(url, userId);
       if (!spam.allowed) {
         return { url, status: "rejected", reason: spam.reason };
       }
 
-      // Duplicate check
       const dup = await checkDuplicate(url, userId);
       if (dup.isDuplicate) {
         return { url, status: "duplicate", existingId: dup.existingId };
       }
 
-      // Malware check
       const malware = await malwareCheck(url);
       if (!malware.safe) {
         return { url, status: "malware", reason: `Flagged as ${malware.threatType}` };
       }
 
-      // Health check
       if (!skipHealthCheck) {
         const health = await runHealthCheck(url);
         if (!health.isIndexable) {
@@ -77,8 +87,15 @@ async function processUrls(
       }
 
       return { url, status: "valid", health: null };
-    })
+    }))
   );
+
+  // Flatten settled results — treat rejections as errors
+  const processed = settled.map((s, i) => {
+    if (s.status === "fulfilled") return s.value;
+    logger.error({ err: s.reason, url: rawUrls[i] }, "URL pre-processing threw unexpectedly");
+    return { url: rawUrls[i], status: "rejected", reason: "Internal processing error" };
+  });
 
   // Step 2: Count valid URLs and check credit sufficiency
   const validItems = processed.filter((p) => p.status === "valid");
@@ -105,7 +122,6 @@ async function processUrls(
       continue;
     }
 
-    // Valid URL — create record and charge credit
     try {
       const urlRecord = await prisma.url.create({
         data: {
@@ -119,7 +135,6 @@ async function processUrls(
         },
       });
 
-      // Persist the health check so it shows in the URL detail panel
       if (item.health) {
         await prisma.urlHealthCheck.create({ data: healthCheckToRecord(urlRecord.id, item.health) });
       }
@@ -127,7 +142,6 @@ async function processUrls(
       await deductCredit(userId, urlRecord.id, `URL indexing: ${item.url}`);
       creditsUsed++;
 
-      // Fire all 6 signals in parallel via queue
       for (const signalType of SIGNALS) {
         await indexingSignalQueue.add("signal", {
           urlId: urlRecord.id,
@@ -153,11 +167,11 @@ export default async function urlRoutes(app: FastifyInstance) {
 
   // POST /api/urls/health-check
   app.post("/health-check", {
-    config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
+    config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
   }, async (req, reply) => {
-    const { urls } = z.object({ urls: z.array(z.string()).max(100) }).parse(req.body);
-    const results = await Promise.all(urls.map((url) => runHealthCheck(url)));
-    return reply.send(results);
+    const { urls } = z.object({ urls: z.array(z.string()).max(20) }).parse(req.body);
+    const results = await Promise.allSettled(urls.map((url) => runHealthCheck(url)));
+    return reply.send(results.map((r) => r.status === "fulfilled" ? r.value : { error: "Check failed" }));
   });
 
   // POST /api/urls/submit
@@ -166,6 +180,16 @@ export default async function urlRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     const userId = (req as any).user.id;
     const body = submitSchema.parse(req.body);
+
+    // Verify the project belongs to this user
+    const project = await prisma.project.findFirst({ where: { id: body.projectId, userId } });
+    if (!project) return reply.status(404).send({ error: "Project not found" });
+
+    if (body.campaignId) {
+      const campaign = await prisma.campaign.findFirst({ where: { id: body.campaignId, userId } });
+      if (!campaign) return reply.status(404).send({ error: "Campaign not found" });
+    }
+
     const { results, creditsUsed, healthFailed, alreadyIndexed, duplicates } = await processUrls(
       body.urls, userId, body.projectId, body.campaignId, body.skipHealthCheck, "dashboard"
     );
@@ -174,46 +198,132 @@ export default async function urlRoutes(app: FastifyInstance) {
   });
 
   // POST /api/urls/submit/csv
-  app.post("/submit/csv", async (req, reply) => {
+  app.post("/submit/csv", {
+    config: { rateLimit: { max: 5, timeWindow: "1 hour" } },
+  }, async (req, reply) => {
     const userId = (req as any).user.id;
     const data = await req.file();
     if (!data) return reply.status(400).send({ error: "No file uploaded" });
+
+    const { projectId, campaignId } = z.object({
+      projectId: z.string().uuid().optional(),
+      campaignId: z.string().uuid().optional(),
+    }).parse(req.query);
+
+    if (projectId) {
+      const project = await prisma.project.findFirst({ where: { id: projectId, userId } });
+      if (!project) return reply.status(404).send({ error: "Project not found" });
+    }
+    if (campaignId) {
+      const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, userId } });
+      if (!campaign) return reply.status(404).send({ error: "Campaign not found" });
+    }
+
+    // Resolve a default project if none provided
+    const resolvedProjectId = projectId ?? (await prisma.project.findFirst({ where: { userId } }))?.id;
+    if (!resolvedProjectId) return reply.status(400).send({ error: "No project found. Create a project first." });
+
     const buffer = await data.toBuffer();
     const records = csvParse(buffer, { columns: true, skip_empty_lines: true });
     const urls: string[] = records.map((r: any) => r.url ?? r.URL ?? Object.values(r)[0]).filter(Boolean);
 
-    const { projectId, campaignId } = req.query as any;
-    const { results, creditsUsed, healthFailed } = await processUrls(urls.slice(0, MAX_BATCH), userId, projectId, campaignId, false, "bulk_csv");
+    const { results, creditsUsed, healthFailed } = await processUrls(
+      urls.slice(0, MAX_BATCH), userId, resolvedProjectId, campaignId, false, "bulk_csv"
+    );
     return reply.send({ submitted: results.filter((r) => r.status === "submitted").length, creditsUsed, healthFailed, total: urls.length });
   });
 
   // POST /api/urls/submit/sitemap
-  app.post("/submit/sitemap", async (req, reply) => {
+  app.post("/submit/sitemap", {
+    config: { rateLimit: { max: 5, timeWindow: "1 hour" } },
+  }, async (req, reply) => {
     const userId = (req as any).user.id;
-    const { sitemapUrl, projectId, campaignId } = req.body as any;
+    const body = sitemapSubmitSchema.parse(req.body);
+
+    // SSRF protection: re-validate the sitemap URL through the same validator that blocks private IPs
+    const urlCheck = validateUrlFormat(body.sitemapUrl);
+    if (!urlCheck.valid) return reply.status(400).send({ error: `Invalid sitemap URL: ${urlCheck.reason}` });
+
+    if (body.projectId) {
+      const project = await prisma.project.findFirst({ where: { id: body.projectId, userId } });
+      if (!project) return reply.status(404).send({ error: "Project not found" });
+    }
+    if (body.campaignId) {
+      const campaign = await prisma.campaign.findFirst({ where: { id: body.campaignId, userId } });
+      if (!campaign) return reply.status(404).send({ error: "Campaign not found" });
+    }
+
+    const resolvedProjectId = body.projectId ?? (await prisma.project.findFirst({ where: { userId } }))?.id;
+    if (!resolvedProjectId) return reply.status(400).send({ error: "No project found. Create a project first." });
+
     const axios = (await import("axios")).default;
-    const resp = await axios.get(sitemapUrl, { timeout: 10000 });
+    // maxRedirects:0 prevents SSRF via open redirect — a public URL could 301 to
+    // 169.254.169.254 (cloud metadata) after passing the validateUrlFormat check.
+    const resp = await axios.get(body.sitemapUrl, { timeout: 10000, maxRedirects: 0 });
     const parser = new XMLParser();
     const parsed = parser.parse(resp.data);
     const urls: string[] = (parsed?.urlset?.url ?? []).map((u: any) => u.loc).filter(Boolean);
 
-    const { results, creditsUsed, healthFailed } = await processUrls(urls.slice(0, MAX_BATCH), userId, projectId, campaignId, false, "sitemap_import");
+    const { results, creditsUsed, healthFailed } = await processUrls(
+      urls.slice(0, MAX_BATCH), userId, resolvedProjectId, body.campaignId, false, "sitemap_import"
+    );
     return reply.send({ submitted: results.filter((r) => r.status === "submitted").length, creditsUsed, healthFailed, total: urls.length });
+  });
+
+  // GET /api/urls/export — MUST be registered before /:id to avoid being shadowed
+  app.get("/export", async (req, reply) => {
+    const userId = (req as any).user.id;
+    const { projectId, status } = req.query as any;
+
+    // Stream in chunks to avoid loading 10k rows into memory at once
+    const PAGE_SIZE = 1000;
+    const chunks: string[] = ["URL,Status,Submitted,Indexed At,Retry Count,Credits Charged"];
+    let cursor: string | undefined;
+
+    while (true) {
+      const rows = await prisma.url.findMany({
+        where: { userId, ...(projectId ? { projectId } : {}), ...(status ? { status } : {}) },
+        orderBy: { createdAt: "desc" },
+        take: PAGE_SIZE,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+        select: { id: true, url: true, status: true, createdAt: true, indexedAt: true, retryCount: true, creditCharged: true },
+      });
+
+      for (const u of rows) {
+        const safeUrl = u.url.startsWith("=") || u.url.startsWith("+") || u.url.startsWith("-") || u.url.startsWith("@")
+          ? `\t${u.url}` : u.url;
+        chunks.push(`"${safeUrl}","${u.status}","${u.createdAt.toISOString()}","${u.indexedAt?.toISOString() ?? ""}","${u.retryCount}","${u.creditCharged}"`);
+      }
+
+      if (rows.length < PAGE_SIZE) break;
+      cursor = rows[rows.length - 1].id;
+    }
+
+    reply.header("Content-Type", "text/csv");
+    reply.header("Content-Disposition", "attachment; filename=urls.csv");
+    return reply.send(chunks.join("\n"));
   });
 
   // GET /api/urls
   app.get("/", async (req, reply) => {
     const userId = (req as any).user.id;
-    const { projectId, campaignId, status, limit = "50", offset = "0" } = req.query as any;
+    const { projectId, campaignId, status } = req.query as any;
+    const { limit, offset } = paginationSchema.parse(req.query);
 
-    const urls = await prisma.url.findMany({
-      where: { userId, ...(projectId ? { projectId } : {}), ...(campaignId ? { campaignId } : {}), ...(status ? { status } : {}) },
-      orderBy: { createdAt: "desc" },
-      take: parseInt(limit),
-      skip: parseInt(offset),
-      include: { healthChecks: { take: 1, orderBy: { checkedAt: "desc" } }, signals: { orderBy: { attemptedAt: "desc" } } },
-    });
-    return reply.send(urls);
+    const where = { userId, ...(projectId ? { projectId } : {}), ...(campaignId ? { campaignId } : {}), ...(status ? { status } : {}) };
+
+    const [urls, total] = await Promise.all([
+      prisma.url.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+        include: { healthChecks: { take: 1, orderBy: { checkedAt: "desc" } }, signals: { orderBy: { attemptedAt: "desc" } } },
+      }),
+      prisma.url.count({ where }),
+    ]);
+
+    return reply.send({ urls, total });
   });
 
   // GET /api/urls/:id
@@ -304,25 +414,5 @@ export default async function urlRoutes(app: FastifyInstance) {
     if (!url) return reply.status(404).send({ error: "URL not found" });
     await prisma.url.delete({ where: { id } });
     return reply.send({ message: "URL deleted" });
-  });
-
-  // GET /api/urls/export (CSV)
-  app.get("/export", async (req, reply) => {
-    const userId = (req as any).user.id;
-    const { projectId, status } = req.query as any;
-    const urls = await prisma.url.findMany({
-      where: { userId, ...(projectId ? { projectId } : {}), ...(status ? { status } : {}) },
-      orderBy: { createdAt: "desc" },
-      take: 10000,
-    });
-
-    const csv = [
-      "URL,Status,Submitted,Indexed At,Retry Count,Credits Charged",
-      ...urls.map((u) => `"${u.url}","${u.status}","${u.createdAt.toISOString()}","${u.indexedAt?.toISOString() ?? ""}","${u.retryCount}","${u.creditCharged}"`),
-    ].join("\n");
-
-    reply.header("Content-Type", "text/csv");
-    reply.header("Content-Disposition", "attachment; filename=urls.csv");
-    return reply.send(csv);
   });
 }

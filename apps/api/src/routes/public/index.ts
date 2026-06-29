@@ -9,7 +9,12 @@ import { generateSitemapXml } from "../../modules/signals/sitemapEngine.js";
 // by an unguessable user UUID in the path.
 
 function escapeXml(str: string): string {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 function rfcDate(d: Date): string {
@@ -174,31 +179,22 @@ ${items}
 </html>`;
   }
 
-  app.get("/discover/recent", async (_req, reply) => {
-    const cacheKey = "discover:recent";
-    let html = await cacheGet<string>(cacheKey);
-    if (!html) {
-      const urls = await prisma.url.findMany({ orderBy: { createdAt: "desc" }, take: 100, select: { url: true } });
-      html = await discoverHtml("Recent Submissions", urls.map((u) => u.url));
-      await cacheSet(cacheKey, html, 60);
-    }
-    reply.header("Content-Type", "text/html; charset=utf-8");
-    return reply.send(html);
-  });
+  // /discover/recent and /discover/fresh removed — they exposed all users' submitted
+  // URLs globally with no opt-in. The crawl_trigger signal now only invalidates
+  // the per-user cache; global discovery is not needed for indexing signals to work.
 
-  app.get("/discover/fresh", async (_req, reply) => {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const urls = await prisma.url.findMany({ where: { createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: 500, select: { url: true } });
-    const html = await discoverHtml("Fresh Today", urls.map((u) => u.url));
-    reply.header("Content-Type", "text/html; charset=utf-8");
-    return reply.send(html);
-  });
-
-  app.get("/discover/u/:userId", async (req, reply) => {
+  // Per-user discovery page — scoped by unguessable UUID, rate-limited
+  app.get("/discover/u/:userId", {
+    config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+  }, async (req, reply) => {
     const { userId } = req.params as { userId: string };
-
-    const urls = await prisma.url.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, take: 50, select: { url: true } });
-    const html = await discoverHtml("User Submissions", urls.map((u) => u.url));
+    const urls = await prisma.url.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: { url: true },
+    });
+    const html = await discoverHtml("User Submissions", urls.map((u: { url: string }) => u.url));
     reply.header("Content-Type", "text/html; charset=utf-8");
     return reply.send(html);
   });

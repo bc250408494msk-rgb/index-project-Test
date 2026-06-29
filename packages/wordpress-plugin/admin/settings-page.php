@@ -56,6 +56,12 @@ class IndexMeNow_Settings_Page {
                                 <button type="button" class="button" onclick="indexmenow_test_connection()">Test Connection</button>
                                 <span id="indexmenow-test-result"></span>
                             <?php endif; ?>
+                            <p class="description" style="color:#8a6d3b; background:#fcf8e3; border:1px solid #faebcc; padding:6px 8px; border-radius:3px; margin-top:6px;">
+                                <strong>Security notice:</strong> This API key is stored in plaintext in the WordPress <code>wp_options</code> database table.
+                                Any WordPress administrator can read it via the database or <code>get_option()</code>.
+                                Rotate the key immediately if an admin account is compromised.
+                                Use a dedicated read-only API key for this plugin rather than a shared credential.
+                            </p>
                         </td>
                     </tr>
                     <tr>

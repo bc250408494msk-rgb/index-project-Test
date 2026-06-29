@@ -70,6 +70,10 @@ export async function adminGrantCredits(adminId: string, targetUserId: string, a
     const user = await tx.user.findUniqueOrThrow({ where: { id: targetUserId } });
     const newBalance = user.creditsBalance + amount;
 
+    if (newBalance < 0) {
+      throw new Error(`Deduction of ${Math.abs(amount)} would result in negative balance (current: ${user.creditsBalance})`);
+    }
+
     await tx.user.update({ where: { id: targetUserId }, data: { creditsBalance: { increment: amount } } });
     await tx.creditTransaction.create({
       data: {

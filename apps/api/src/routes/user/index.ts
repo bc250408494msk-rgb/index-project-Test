@@ -4,6 +4,9 @@ import { randomBytes, createHash } from "crypto";
 import { z } from "zod";
 import { prisma } from "../../utils/prisma.js";
 import { authenticate } from "../../middleware/authenticate.js";
+import { getRedis } from "../../utils/redis.js";
+
+const REFRESH_TOKEN_TTL = 30 * 24 * 60 * 60;
 
 const profileSchema = z.object({
   username: z.string().min(3).max(100).regex(/^[a-zA-Z0-9_.-]+$/).optional(),
@@ -56,14 +59,49 @@ export default async function userRoutes(app: FastifyInstance) {
     }
     const passwordHash = await bcrypt.hash(body.newPassword, 12);
     await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
-    return reply.send({ message: "Password updated" });
+
+    // Revoke current refresh token so existing sessions must re-login
+    const refreshToken = req.cookies?.refreshToken;
+    if (refreshToken) {
+      try {
+        const payload = (req.server as any).jwt.verify(refreshToken) as { jti?: string };
+        if (payload.jti) {
+          await getRedis().setex(`blacklist:jti:${payload.jti}`, REFRESH_TOKEN_TTL, "1");
+        }
+      } catch {
+        // Expired or invalid — nothing to revoke
+      }
+    }
+
+    reply
+      .clearCookie("accessToken", { path: "/" })
+      .clearCookie("refreshToken", { path: "/api/auth" });
+    return reply.send({ message: "Password updated. Please log in again." });
   });
 
   // DELETE /api/user/account
   app.delete("/account", async (req, reply) => {
     const userId = (req as any).user.id;
+
+    // Revoke the current refresh token before deleting the account
+    const refreshToken = req.cookies?.refreshToken;
+    if (refreshToken) {
+      try {
+        const payload = (req.server as any).jwt.verify(refreshToken) as { jti?: string };
+        if (payload.jti) {
+          await getRedis().setex(`blacklist:jti:${payload.jti}`, REFRESH_TOKEN_TTL, "1");
+        }
+      } catch { /* already expired — fine */ }
+    }
+
+    // Cascade delete handles all related records (URLs, signals, verifications, etc.)
+    // BullMQ jobs that are in-flight will fail gracefully when they can't find the URL
+    // record — the worker catch blocks handle this silently.
     await prisma.user.delete({ where: { id: userId } });
-    reply.clearCookie("accessToken").clearCookie("refreshToken");
+
+    reply
+      .clearCookie("accessToken", { path: "/" })
+      .clearCookie("refreshToken", { path: "/api/auth" });
     return reply.send({ message: "Account deleted" });
   });
 

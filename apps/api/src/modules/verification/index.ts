@@ -45,7 +45,13 @@ export async function verifyUrl(urlId: string, url: string): Promise<{ isIndexed
     },
   });
 
-  // Double-verify: need 2 consecutive positives
+  // Always record the check attempt on the URL row
+  await prisma.url.update({
+    where: { id: urlId },
+    data: { checkCount: { increment: 1 }, lastCheckAt: new Date() },
+  });
+
+  // Double-verify: need 2 consecutive positives before marking indexed
   if (isIndexed && DOUBLE_VERIFY) {
     const recentChecks = await prisma.verificationCheck.findMany({
       where: { urlId },
@@ -56,18 +62,16 @@ export async function verifyUrl(urlId: string, url: string): Promise<{ isIndexed
     const consecutivePositives = recentChecks.length >= 2 && recentChecks.every((c) => c.isIndexed);
     if (!consecutivePositives) {
       logger.info({ urlId }, "First positive verification — waiting for confirmation");
-      return { isIndexed: false, method }; // Don't mark as indexed yet
+      return { isIndexed: false, method };
     }
   }
 
-  await prisma.url.update({
-    where: { id: urlId },
-    data: {
-      checkCount: { increment: 1 },
-      lastCheckAt: new Date(),
-      ...(isIndexed ? { status: "indexed", indexedAt: new Date() } : {}),
-    },
-  });
+  if (isIndexed) {
+    await prisma.url.update({
+      where: { id: urlId },
+      data: { status: "indexed", indexedAt: new Date() },
+    });
+  }
 
   return { isIndexed, method };
 }

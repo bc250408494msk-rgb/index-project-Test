@@ -84,8 +84,9 @@ export interface IndexingSignalJob {
 export interface VerificationJob {
   urlId: string;
   url: string;
-  checkCount: number;
   submittedAt: string;
+  /** @deprecated checkCount is now read from the DB — kept for backward compat with already-queued jobs */
+  checkCount?: number;
 }
 
 export interface RetryJob {

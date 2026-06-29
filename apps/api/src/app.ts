@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { randomBytes } from "crypto";
 import { ZodError } from "zod";
 import fastifyCookie from "@fastify/cookie";
 import fastifyCors from "@fastify/cors";
@@ -63,7 +64,7 @@ export async function buildApp() {
 
   // ── Cookies ──────────────────────────────────────────────────
   await app.register(fastifyCookie, {
-    secret: process.env.JWT_SECRET!,
+    secret: process.env.COOKIE_SECRET ?? process.env.JWT_SECRET!,
   });
 
   // ── JWT ──────────────────────────────────────────────────────
@@ -84,9 +85,18 @@ export async function buildApp() {
     limits: { fileSize: 5 * 1024 * 1024 },
   });
 
+  // ── Request ID ────────────────────────────────────────────────
+  // Propagate caller's X-Request-ID or generate one; echo it back in the response
+  // so logs on both sides can be correlated without a tracing system.
+  app.addHook("onRequest", async (req, reply) => {
+    const requestId = (req.headers["x-request-id"] as string) || randomBytes(8).toString("hex");
+    (req as any).requestId = requestId;
+    reply.header("X-Request-ID", requestId);
+  });
+
   // ── Request logging ───────────────────────────────────────────
   app.addHook("onRequest", async (req) => {
-    logger.info({ method: req.method, url: req.url, ip: req.ip }, "Incoming request");
+    logger.info({ method: req.method, url: req.url, ip: req.ip, requestId: (req as any).requestId }, "Incoming request");
   });
 
   app.addHook("onResponse", async (req, reply) => {

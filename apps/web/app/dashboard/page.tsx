@@ -111,15 +111,16 @@ export default function DashboardPage() {
     },
   });
 
+  const recentUrls: any[] = urlsData?.urls ?? [];
+  const totalSubmitted = urlsData?.total ?? 0;
+
   const stats = [
     { label: "Credits", value: balance?.credits ?? user?.creditsBalance ?? 0, icon: "💳", color: "text-blue-600" },
-    { label: "Submitted", value: urlsData?.total ?? urlsData?.length ?? 0, icon: "🔗", color: "text-gray-700" },
-    { label: "Indexed", value: urlsData?.indexed ?? urlsData?.filter((u: any) => u.status === "indexed").length ?? 0, icon: "✅", color: "text-green-600" },
-    { label: "Pending", value: urlsData?.pending ?? urlsData?.filter((u: any) => ["submitted", "signals_firing"].includes(u.status)).length ?? 0, icon: "⏳", color: "text-yellow-600" },
-    { label: "Refunded", value: urlsData?.filter?.((u: any) => u.status === "refunded").length ?? 0, icon: "🔄", color: "text-orange-600" },
+    { label: "Submitted", value: totalSubmitted, icon: "🔗", color: "text-gray-700" },
+    { label: "Indexed", value: recentUrls.filter((u: any) => u.status === "indexed").length, icon: "✅", color: "text-green-600" },
+    { label: "Pending", value: recentUrls.filter((u: any) => ["submitted", "signals_firing"].includes(u.status)).length, icon: "⏳", color: "text-yellow-600" },
+    { label: "Refunded", value: recentUrls.filter((u: any) => u.status === "refunded").length, icon: "🔄", color: "text-orange-600" },
   ];
-
-  const recentUrls = Array.isArray(urlsData) ? urlsData : (urlsData?.urls ?? []);
 
   return (
     <div className="space-y-8">

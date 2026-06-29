@@ -8,16 +8,16 @@ export function normalizeUrl(rawUrl: string): string {
     if (u.pathname.length > 1 && u.pathname.endsWith("/")) {
       u.pathname = u.pathname.slice(0, -1);
     }
-    // Decode encoded chars and re-encode consistently
-    u.search = u.search;
+    // Sort query params so ?b=2&a=1 and ?a=1&b=2 produce the same hash
+    u.searchParams.sort();
     return u.toString();
   } catch {
     return rawUrl.trim().toLowerCase();
   }
 }
 
-export function hashUrl(url: string): string {
-  return createHash("sha256").update(normalizeUrl(url)).digest("hex");
+export function hashUrl(normalizedUrl: string): string {
+  return createHash("sha256").update(normalizedUrl).digest("hex");
 }
 
 const PRIVATE_IP_RANGES = [
@@ -25,8 +25,15 @@ const PRIVATE_IP_RANGES = [
   /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/,
   /^192\.168\.\d+\.\d+$/,
   /^127\.\d+\.\d+\.\d+$/,
+  /^169\.254\.\d+\.\d+$/,        // link-local / APIPA — AWS/GCP/Azure metadata (169.254.169.254)
+  /^100\.6[4-9]\.\d+\.\d+$/,     // carrier-grade NAT RFC 6598 (100.64.0.0/10)
+  /^100\.[7-9]\d\.\d+\.\d+$/,
+  /^100\.1[01]\d\.\d+\.\d+$/,
+  /^100\.12[0-7]\.\d+\.\d+$/,
   /^::1$/,
   /^fc[0-9a-f]{2}:/i,
+  /^::ffff:169\.254\./i,          // IPv4-mapped IPv6 form of link-local
+  /^::ffff:a9fe:/i,               // same in hex
 ];
 
 const RESERVED_HOSTS = ["localhost", "0.0.0.0", "255.255.255.255"];

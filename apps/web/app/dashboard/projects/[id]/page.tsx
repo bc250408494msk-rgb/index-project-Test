@@ -27,10 +27,11 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
 
   const qc = useQueryClient();
   const { data: project } = useQuery({ queryKey: ["project", params.id], queryFn: () => projectApi.get(params.id).then((r) => r.data) });
-  const { data: urls, isLoading } = useQuery({
+  const { data: urlsData, isLoading } = useQuery({
     queryKey: ["urls", params.id, filter],
     queryFn: () => urlApi.list({ projectId: params.id, status: filter === "all" ? undefined : filter, limit: 100 }).then((r) => r.data),
   });
+  const urls: any[] = urlsData?.urls ?? [];
 
   const deleteUrl = useMutation({
     mutationFn: (id: string) => urlApi.delete(id),
@@ -78,7 +79,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
             {isLoading && (
               <tr><td colSpan={8} className="text-center py-8 text-gray-400">Loading URLs...</td></tr>
             )}
-            {!isLoading && urls?.length === 0 && (
+            {!isLoading && urls.length === 0 && (
               <tr><td colSpan={8} className="text-center py-8 text-gray-400">No URLs found.</td></tr>
             )}
             {urls?.map((url: any) => (

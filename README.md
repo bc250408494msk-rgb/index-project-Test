@@ -24,7 +24,7 @@ A full-stack SaaS platform that accelerates Google indexing for your URLs by fir
 | Frontend | Next.js 14 App Router, React 18 |
 | UI | Tailwind CSS, shadcn/ui (Radix primitives) |
 | Data fetching | TanStack Query v5 |
-| Auth | JWT (httpOnly cookies + localStorage mirror) |
+| Auth | JWT (httpOnly cookies) |
 | Email | Resend SDK |
 | Monorepo | Turborepo + npm workspaces |
 | Containerised infra | Docker Compose (Postgres + Redis) |
@@ -57,8 +57,7 @@ Edit `.env` and fill in at minimum:
 |----------|--------------|
 | `DATABASE_URL` | Already set for Docker — leave as-is |
 | `REDIS_URL` | Already set for Docker — leave as-is |
-| `JWT_SECRET` | Any random 32+ character string |
-| `JWT_REFRESH_SECRET` | Any different random 32+ character string |
+| `JWT_SECRET` | Any random 32+ character string (used for both access + refresh tokens) |
 | `RESEND_API_KEY` | [resend.com](https://resend.com) → API Keys → Create |
 | `EMAIL_FROM` | Use `onboarding@resend.dev` while testing (no domain needed) |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Google Cloud Console → IAM → Service Accounts → Create key (JSON), paste as single line |
@@ -82,15 +81,23 @@ This starts PostgreSQL on port 5432 and Redis on port 6379.
 
 ### 4. Set up the database
 
+> **Important:** always run these three commands in order — generate must come first.
+
 ```bash
-# Run migrations
+# 1. Generate the Prisma client (required after every fresh clone or schema change)
+npm run db:generate
+
+# 2. Apply migrations
 cd packages/database && npm run db:migrate:deploy
 
-# Seed system settings + default admin user
+# 3. Seed system settings + default admin user
 npm run db:seed
 ```
 
 Default admin credentials: `admin@indexmenow.com` / `Admin@123!`
+
+> If you skip `db:generate` you will get:
+> `Error: @prisma/client did not initialize yet. Please run "prisma generate" and try to import it again.`
 
 ### 5. Run the app
 
@@ -207,6 +214,41 @@ Login as admin and navigate to `/admin`:
 - **URLs** — search and filter all submitted URLs, force-reindex
 - **Queues** — monitor BullMQ job counts (active, waiting, failed) per worker
 - **Settings** — configure system-wide defaults (refund window, retry window, credit thresholds)
+
+## Troubleshooting
+
+### Reset Docker containers (wipe all local data and start fresh)
+
+```bash
+# Stop and remove both containers + their volumes
+docker rm -f indexmenow_redis indexmenow_postgres
+docker volume rm index-project-test_postgres_data index-project-test_redis_data
+
+# Then start fresh
+docker-compose up -d
+npm run db:generate
+cd packages/database && npm run db:migrate:deploy && npm run db:seed
+```
+
+> Use this when: the database is in a broken state, you want a clean slate after schema changes, or migrations are failing unexpectedly.
+
+### Prisma client not initialized
+
+```
+Error: @prisma/client did not initialize yet. Please run "prisma generate"
+```
+
+Run `npm run db:generate` from the repo root, then retry.
+
+### Port already in use
+
+```bash
+# Kill whatever is on port 5432 or 6379
+npx kill-port 5432 6379
+# Or just remove the containers (see above)
+```
+
+---
 
 ## Development Commands
 

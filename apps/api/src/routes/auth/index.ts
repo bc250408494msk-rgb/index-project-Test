@@ -1,9 +1,10 @@
 import { FastifyInstance } from "fastify";
 import bcrypt from "bcrypt";
-import { randomBytes } from "crypto";
+import { randomBytes, createHash } from "crypto";
 import { z } from "zod";
 import { prisma } from "../../utils/prisma.js";
 import { emailService } from "../../services/emailService.js";
+import { getRedis } from "../../utils/redis.js";
 
 const registerSchema = z.object({
   username: z.string().min(3).max(100).regex(/^[a-zA-Z0-9_.-]+$/),
@@ -23,16 +24,39 @@ const resetSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
+// 30d in seconds — must match JWT_REFRESH_EXPIRY
+const REFRESH_TOKEN_TTL = 30 * 24 * 60 * 60;
+
+function hashToken(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex");
+}
+
 function signTokens(app: FastifyInstance, userId: string, role: string) {
+  // Each token pair carries a unique JTI (JWT ID) so the refresh token can be
+  // individually revoked in Redis on logout or password change.
+  const jti = randomBytes(16).toString("hex");
+
   const accessToken = app.jwt.sign(
     { id: userId, role },
     { expiresIn: process.env.JWT_ACCESS_EXPIRY ?? "15m" }
   );
+  // JWT_REFRESH_SECRET is documented in .env.example but @fastify/jwt only
+  // supports a single secret. Both tokens are signed with JWT_SECRET.
+  // The refresh type is distinguished by the `type: "refresh"` + `jti` claims.
   const refreshToken = app.jwt.sign(
-    { id: userId, role, type: "refresh" },
+    { id: userId, role, type: "refresh", jti },
     { expiresIn: process.env.JWT_REFRESH_EXPIRY ?? "30d" }
   );
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, jti };
+}
+
+async function revokeRefreshJti(jti: string): Promise<void> {
+  await getRedis().setex(`blacklist:jti:${jti}`, REFRESH_TOKEN_TTL, "1");
+}
+
+async function isRefreshJtiRevoked(jti: string): Promise<boolean> {
+  const val = await getRedis().get(`blacklist:jti:${jti}`);
+  return val !== null;
 }
 
 export default async function authRoutes(app: FastifyInstance) {
@@ -50,7 +74,9 @@ export default async function authRoutes(app: FastifyInstance) {
     }
 
     const passwordHash = await bcrypt.hash(body.password, 12);
-    const verifyToken = randomBytes(32).toString("hex");
+    const rawToken = randomBytes(32).toString("hex");
+    // Store the hash — the raw token travels only in the email link
+    const tokenHash = hashToken(rawToken);
     const verifyExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const user = await prisma.user.create({
@@ -58,12 +84,12 @@ export default async function authRoutes(app: FastifyInstance) {
         username: body.username,
         email: body.email,
         passwordHash,
-        emailVerifyToken: verifyToken,
+        emailVerifyToken: tokenHash,
         emailVerifyExpiresAt: verifyExpiry,
       },
     });
 
-    await emailService.sendEmailVerification(user.email, verifyToken);
+    await emailService.sendEmailVerification(user.email, rawToken);
 
     return reply.status(201).send({ message: "Account created. Please verify your email." });
   });
@@ -71,8 +97,9 @@ export default async function authRoutes(app: FastifyInstance) {
   // GET /api/auth/verify-email/:token
   app.get("/verify-email/:token", async (req, reply) => {
     const { token } = req.params as { token: string };
+    const tokenHash = hashToken(token);
     const user = await prisma.user.findFirst({
-      where: { emailVerifyToken: token, emailVerifyExpiresAt: { gt: new Date() } },
+      where: { emailVerifyToken: tokenHash, emailVerifyExpiresAt: { gt: new Date() } },
     });
     if (!user) return reply.status(400).send({ error: "Invalid or expired verification token" });
 
@@ -88,7 +115,7 @@ export default async function authRoutes(app: FastifyInstance) {
 
   // POST /api/auth/login
   app.post("/login", {
-    config: { rateLimit: { max: 50, timeWindow: "15 minutes" } },
+    config: { rateLimit: { max: 10, timeWindow: "15 minutes" } },
   }, async (req, reply) => {
     const body = loginSchema.parse(req.body);
 
@@ -102,8 +129,6 @@ export default async function authRoutes(app: FastifyInstance) {
 
     if (!user.isActive) return reply.status(403).send({ error: "Account is disabled" });
 
-    // Email verification gate — set REQUIRE_EMAIL_VERIFICATION=false to allow login
-    // before email delivery (Resend verified domain) is configured.
     const requireEmailVerification = process.env.REQUIRE_EMAIL_VERIFICATION !== "false";
     if (requireEmailVerification && !user.emailVerified) {
       return reply.status(403).send({ error: "Please verify your email before signing in. Check your inbox or resend the verification email." });
@@ -118,6 +143,7 @@ export default async function authRoutes(app: FastifyInstance) {
       .setCookie("refreshToken", refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", path: "/api/auth" })
       .send({
         user: { id: user.id, username: user.username, email: user.email, role: user.role, creditsBalance: user.creditsBalance },
+        // accessToken is also set as an httpOnly cookie — do not store in localStorage
         accessToken,
       });
   });
@@ -128,11 +154,30 @@ export default async function authRoutes(app: FastifyInstance) {
     if (!token) return reply.status(401).send({ error: "Refresh token missing" });
 
     try {
-      const payload = app.jwt.verify(token) as { id: string; role: string; type: string };
+      const payload = app.jwt.verify(token) as { id: string; role: string; type: string; jti?: string };
       if (payload.type !== "refresh") throw new Error("Not a refresh token");
+      // jti is mandatory — tokens without one cannot be revoked and must be rejected
+      if (!payload.jti) throw new Error("Refresh token missing jti");
+
+      // Check if this specific token has been revoked (logout / password change)
+      if (await isRefreshJtiRevoked(payload.jti)) {
+        return reply.status(401).send({ error: "Token has been revoked" });
+      }
+
+      // Check if token predates a password reset (bulk-invalidation by timestamp)
+      const invalidBefore = await getRedis().get(`session_invalid_before:${payload.id}`);
+      if (invalidBefore) {
+        const tokenIat = (payload as any).iat as number | undefined;
+        if (tokenIat && tokenIat * 1000 < parseInt(invalidBefore)) {
+          return reply.status(401).send({ error: "Session invalidated — please log in again" });
+        }
+      }
 
       const user = await prisma.user.findUnique({ where: { id: payload.id } });
       if (!user || !user.isActive) return reply.status(401).send({ error: "User not found or inactive" });
+
+      // Revoke the old refresh token before issuing a new one (token rotation)
+      await revokeRefreshJti(payload.jti);
 
       const { accessToken, refreshToken } = signTokens(app, user.id, user.role);
 
@@ -146,7 +191,18 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   // POST /api/auth/logout
-  app.post("/logout", async (_req, reply) => {
+  app.post("/logout", async (req, reply) => {
+    // Revoke the refresh token so it cannot be replayed after logout
+    const token = req.cookies?.refreshToken;
+    if (token) {
+      try {
+        const payload = app.jwt.verify(token) as { jti?: string };
+        if (payload.jti) await revokeRefreshJti(payload.jti);
+      } catch {
+        // Expired or invalid token — nothing to revoke
+      }
+    }
+
     reply
       .clearCookie("accessToken", { path: "/" })
       .clearCookie("refreshToken", { path: "/api/auth" })
@@ -161,12 +217,12 @@ export default async function authRoutes(app: FastifyInstance) {
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (user && !user.emailVerified) {
-      const token = randomBytes(32).toString("hex");
+      const rawToken = randomBytes(32).toString("hex");
       await prisma.user.update({
         where: { id: user.id },
-        data: { emailVerifyToken: token, emailVerifyExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+        data: { emailVerifyToken: hashToken(rawToken), emailVerifyExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
       });
-      await emailService.sendEmailVerification(user.email, token);
+      await emailService.sendEmailVerification(user.email, rawToken);
     }
 
     return reply.send({ message: "If your email is registered and unverified, a new link has been sent." });
@@ -174,30 +230,33 @@ export default async function authRoutes(app: FastifyInstance) {
 
   // POST /api/auth/forgot-password
   app.post("/forgot-password", {
-    config: { rateLimit: { max: 20, timeWindow: "15 minutes" } },
+    config: { rateLimit: { max: 5, timeWindow: "15 minutes" } },
   }, async (req, reply) => {
     const { email } = forgotSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { email } });
 
     // Always return 200 to prevent user enumeration
     if (user) {
-      const token = randomBytes(32).toString("hex");
+      const rawToken = randomBytes(32).toString("hex");
       await prisma.user.update({
         where: { id: user.id },
-        data: { passwordResetToken: token, passwordResetExpiresAt: new Date(Date.now() + 60 * 60 * 1000) },
+        data: { passwordResetToken: hashToken(rawToken), passwordResetExpiresAt: new Date(Date.now() + 60 * 60 * 1000) },
       });
-      await emailService.sendPasswordReset(user.email, token);
+      await emailService.sendPasswordReset(user.email, rawToken);
     }
 
     return reply.send({ message: "If an account with that email exists, a reset link has been sent." });
   });
 
   // POST /api/auth/reset-password
-  app.post("/reset-password", async (req, reply) => {
+  app.post("/reset-password", {
+    config: { rateLimit: { max: 5, timeWindow: "15 minutes" } },
+  }, async (req, reply) => {
     const { token, password } = resetSchema.parse(req.body);
+    const tokenHash = hashToken(token);
 
     const user = await prisma.user.findFirst({
-      where: { passwordResetToken: token, passwordResetExpiresAt: { gt: new Date() } },
+      where: { passwordResetToken: tokenHash, passwordResetExpiresAt: { gt: new Date() } },
     });
     if (!user) return reply.status(400).send({ error: "Invalid or expired reset token" });
 
@@ -207,6 +266,10 @@ export default async function authRoutes(app: FastifyInstance) {
       data: { passwordHash, passwordResetToken: null, passwordResetExpiresAt: null },
     });
 
-    return reply.send({ message: "Password reset successfully" });
+    // Invalidate ALL existing refresh tokens for this user by recording the reset time.
+    // The refresh endpoint rejects any token issued before this timestamp.
+    await getRedis().setex(`session_invalid_before:${user.id}`, REFRESH_TOKEN_TTL, Date.now().toString());
+
+    return reply.send({ message: "Password reset successfully. Please log in again." });
   });
 }

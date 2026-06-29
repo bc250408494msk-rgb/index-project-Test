@@ -40,7 +40,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const handleLogout = async () => {
     await authApi.logout();
-    if (typeof window !== "undefined") localStorage.removeItem("accessToken");
     qc.clear();
     router.push("/login");
   };

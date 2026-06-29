@@ -32,10 +32,8 @@ export default function LoginPage() {
     try {
       setError("");
       setIsUnverified(false);
-      const res = await authApi.login(data.email, data.password);
-      if (res.data.accessToken && typeof window !== "undefined") {
-        localStorage.setItem("accessToken", res.data.accessToken);
-      }
+      await authApi.login(data.email, data.password);
+      // Auth is managed via httpOnly cookies set by the server — no localStorage needed
       // Wipe any previous user's cached data so the new user never sees stale dashboards
       qc.clear();
       router.push("/dashboard");
