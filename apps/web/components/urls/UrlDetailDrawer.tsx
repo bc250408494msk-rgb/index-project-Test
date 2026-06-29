@@ -43,6 +43,25 @@ export function UrlDetailDrawer({ urlId, onClose }: Props) {
     },
   });
 
+  const verify = useMutation({
+    mutationFn: () => urlApi.verify(urlId!),
+    onSuccess: (res) => {
+      const isIndexed = res.data?.isIndexed;
+      qc.invalidateQueries({ queryKey: ["url-detail", urlId] });
+      qc.invalidateQueries({ queryKey: ["urls-recent"] });
+      toast({
+        title: isIndexed ? "Confirmed indexed ✅" : "Not indexed yet",
+        description: isIndexed
+          ? "Google has this URL in its index."
+          : "Google hasn't confirmed this URL yet. With double-verify on, two positive checks are required before it's marked indexed.",
+        variant: isIndexed ? "success" : "default",
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Verification failed", description: err?.response?.data?.error ?? "Try again shortly (max 5 checks/hour).", variant: "destructive" });
+    },
+  });
+
   if (!urlId) return null;
 
   return (
@@ -135,7 +154,18 @@ export function UrlDetailDrawer({ urlId, onClose }: Props) {
 
             {/* Section 3: Verification History */}
             <section>
-              <h3 className="font-semibold text-gray-900 mb-3">Verification History</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-900">Verification History</h3>
+                {url.status !== "indexed" && (
+                  <button
+                    onClick={() => verify.mutate()}
+                    disabled={verify.isPending}
+                    className="text-xs px-3 py-1 rounded-lg bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50 font-medium"
+                  >
+                    {verify.isPending ? "Checking…" : "Verify now"}
+                  </button>
+                )}
+              </div>
               {url.verifications?.length > 0 ? (
                 <table className="w-full text-sm">
                   <thead>
