@@ -60,7 +60,7 @@ export function createVerificationWorker() {
       }
     },
     {
-      connection: { connection: getRedis() },
+      connection: getRedis() as any,
       concurrency: 50,
       lockDuration: 60000,
     }

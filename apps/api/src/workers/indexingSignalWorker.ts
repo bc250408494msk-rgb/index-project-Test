@@ -80,7 +80,7 @@ export function createIndexingSignalWorker() {
       }
     },
     {
-      connection: { connection: getRedis() },
+      connection: getRedis() as any,
       concurrency: 10,
       lockDuration: 30000,
     }

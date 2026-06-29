@@ -92,7 +92,7 @@ export function createRetryWorker() {
       }
     },
     {
-      connection: { connection: getRedis() },
+      connection: getRedis() as any,
       concurrency: 5,
       lockDuration: 300000, // 5 min
     }

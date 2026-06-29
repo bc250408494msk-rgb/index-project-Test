@@ -1,7 +1,7 @@
 import { Queue } from "bullmq";
 import { getRedis } from "../utils/redis.js";
 
-const connection = { connection: getRedis() };
+const connection = { connection: getRedis() as any };
 
 // ── Queue definitions ──────────────────────────────────────────
 

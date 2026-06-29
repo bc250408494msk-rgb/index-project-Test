@@ -66,7 +66,7 @@ export function createRefundWorker() {
       }
     },
     {
-      connection: { connection: getRedis() },
+      connection: getRedis() as any,
       concurrency: 5,
       lockDuration: 300000,
     }

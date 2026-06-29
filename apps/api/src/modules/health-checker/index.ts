@@ -54,7 +54,7 @@ export async function runHealthCheck(url: string, timeoutMs = 10000): Promise<He
         maxRedirects: 5,
       });
       htmlContent = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-      contentType = resp.headers["content-type"] ?? "text/html";
+      contentType = String(resp.headers["content-type"] ?? "text/html");
       responseHeaders = resp.headers as Record<string, string>;
     } catch {
       // Already have HTTP result — non-fatal

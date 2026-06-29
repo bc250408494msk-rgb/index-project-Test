@@ -54,7 +54,7 @@ export function createHealthCheckWorker() {
       }
     },
     {
-      connection: { connection: getRedis() },
+      connection: getRedis() as any,
       concurrency: 20,
       lockDuration: 15000,
     }
